@@ -1,0 +1,80 @@
+---
+services:
+  ctfd:
+    image: ctfd/ctfd:3.7.5
+    container_name: ctfd
+    hostname: ctfd
+    restart: unless-stopped
+    environment:
+      - UPLOAD_FOLDER=/var/uploads
+      - DATABASE_URL=mysql+pymysql://db_user:db_password@maria-db/ctfd
+      - REDIS_URL=redis://redis:6379
+      - WORKERS=1 # Check if we need to adjust this
+      - LOG_FOLDER=/var/log/CTFd
+      - ACCESS_LOG=-
+      - ERROR_LOG=-
+      - REVERSE_PROXY=true
+    volumes:
+      - ./data/CTFd/logs:/var/log/CTFd
+      - ./data/CTFd/uploads:/var/uploads
+      - ./CTFd-Docker-Challenges/docker_challenges:/opt/CTFd/CTFd/plugins/docker_challenges:ro
+    depends_on:
+      - redis
+    networks:
+        default:
+        internal:
+
+  caddy:
+  # https://caddyserver.com/docs/running#docker-compose
+    image: caddy:2.9.1-alpine
+    container_name: caddy
+    hostname: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - BASE_DOMAIN=localhost
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./data/caddy/data:/data
+      - ./data/caddy/config:/config
+    depends_on:
+      - ctfd
+    networks:
+        default:
+
+
+  maria-db:
+  # Would have preferred an alpine postresql image but postgresql is not supported officially supported
+    image: mariadb:10.11
+    restart: unless-stopped
+    container_name: maria-db
+    hostname: maria-db
+    environment:
+      - MARIADB_ROOT_PASSWORD=db_root_password
+      - MARIADB_USER=db_user
+      - MARIADB_PASSWORD=db_password
+      - MARIADB_DATABASE=ctfd
+      - MARIADB_AUTO_UPGRADE=1
+    volumes:
+      - ./data/mysql:/var/lib/mysql
+    networks:
+        internal:
+    # This command is required to set important mariadb defaults
+    command: [mysqld, --character-set-server=utf8mb4, --collation-server=utf8mb4_unicode_ci, --wait_timeout=28800, --log-warnings=0]
+
+  redis:
+    container_name: redis
+    hostname: redis
+    image: redis:7.4.2-alpine
+    restart: unless-stopped
+    volumes:
+    - ./data/redis:/data
+    networks:
+        internal:
+
+networks:
+    default:
+    internal:
+        internal: true
