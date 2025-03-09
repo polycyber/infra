@@ -284,30 +284,12 @@ install_ctfd() {
   DOCKER_COMPOSE_FILE="docker-compose.yml"
 
   PLUGIN_PATH="$WORKING_FOLDER/$CTFD_DOCKER_PLUGIN"
-  DOCKER_COMPOSE_PATH="$WORKING_FOLDER/$DOCKER_COMPOSE_FILE"
-
-  DOCKER_COMPOSE_CONFIG=$(cat <<EOF
----
-services:
-  ctfd:
-    image: ctfd/ctfd
-    container_name: ctfd
-    volumes:
-      - $PLUGIN_PATH/docker_challenges:/opt/CTFd/CTFd/plugins/docker_challenges
-    ports:
-      - "8000:8000"
-    restart: unless-stopped
-EOF
-    )
+  DOCKER_COMPOSE_PATH="$WORKING_FOLDER/infra/$DOCKER_COMPOSE_FILE"
 
   echo "Cloning CTFd-Docker-Challenges plugin..."
   git -C "$WORKING_FOLDER" clone "$DOCKER_PLUGIN_REPO"
   echo "CTFd-Docker-Challenges plugin cloned!"
 
-  if [ ! -f "$DOCKER_COMPOSE_PATH" ]; then
-    echo "Creating Docker compose config for ctfd container..."
-    echo "$DOCKER_COMPOSE_CONFIG" > "$DOCKER_COMPOSE_PATH"
-  fi
   docker compose -f "$DOCKER_COMPOSE_PATH" up -d
   echo "CTFd started!"
 
