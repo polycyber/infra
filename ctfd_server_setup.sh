@@ -26,18 +26,13 @@ SERVER_CERT_FILE="server-cert.pem"
 CLIENT_KEY_FILE="client-key.pem"
 CLIENT_CERT_FILE="client-cert.pem"
 
-CERT_COUNTRY="CA"
-CERT_STATE="Quebec"
-CERT_CITY="Montreal"
-CERT_ORGANISATION="PolyCyber"
-CERT_OU="PolyCyber"
-CERT_CN="polycyber.io"
-CERT_EMAIL_ADDRESS="infra@polycyber.io"
-
 # Details for docker deployment
 HOST="127.0.0.11"
 DOCKER_CONTAINER_IP="172.18.0.2"
 
+# Details for CTFd settings and challenge repo settings
+
+DOCKER_PLUGIN_REPO="https://github.com/polycyber/CTFd-Docker-Challenges"
 
 # nano ctfd_server_setup.sh && chmod +x ctfd_server_setup.sh && ./ctfd_server_setup.sh
 # scp -r <user>@<server_ip>:/home/<remote_user>/cert/cert.zip <local_path_for_cert>
@@ -112,15 +107,24 @@ post_install_docker() {
 create_certs() {
   SERVER_CSR_FILE="server.csr"
   CLIENT_CSR_FILE="client.csr"
+  
+  CERT_COUNTRY="CA"
+  CERT_STATE="Quebec"
+  CERT_CITY="Montreal"
+  CERT_ORGANISATION="PolyCyber"
+  CERT_OU="PolyCyber"
+  CERT_CN="polycyber.io"
+  CERT_EMAIL_ADDRESS="infra@polycyber.io"
+
 
   echo "Creating certs in folder $FULL_CERT_PATH..."
   mkdir -p "$FULL_CERT_PATH"
   cd "$FULL_CERT_PATH" || return
 
   echo "Generating CA Private Key..."
-  openssl genrsa -aes256 -passout pass:$CA_PASSWORD -out "$CA_PRIVATE_KEY_FILE" 4096
+  openssl genrsa -aes256 -passout pass:$CA_PASSWORD -out "$CA_KEY_FILE" 4096
   echo "Generating CA..."
-  openssl req -new -x509 -days 365 -key "$CA_PRIVATE_KEY_FILE" -passin pass:$CA_PASSWORD -sha256 -out "$CA_FILE" \
+  openssl req -new -x509 -days 365 -key "$CA_KEY_FILE" -passin pass:$CA_PASSWORD -sha256 -out "$CA_CERT_FILE" \
     -subj "/C=$CERT_COUNTRY/ST=$CERT_STATE/L=$CERT_CITY/O=$CERT_ORGANISATION/OU=$CERT_OU/CN=$CERT_CN/emailAddress=$CERT_EMAIL_ADDRESS"
 
   echo "Generating Server Key..."
@@ -132,7 +136,7 @@ create_certs() {
   extendedKeyUsage = serverAuth" > extfile.cnf
 
   echo "Generating Server Cert..."
-  openssl x509 -req -days 365 -sha256 -in "$SERVER_CSR_FILE" -CA "$CA_FILE" -CAkey "$CA_PRIVATE_KEY_FILE" -passin "pass:$CA_PASSWORD" -CAcreateserial -out "$SERVER_CERT_FILE" -extfile extfile.cnf
+  openssl x509 -req -days 365 -sha256 -in "$SERVER_CSR_FILE" -CA "$CA_CERT_FILE" -CAkey "$CA_KEY_FILE" -passin "pass:$CA_PASSWORD" -CAcreateserial -out "$SERVER_CERT_FILE" -extfile extfile.cnf
 
   echo "Generating Client Key..."
   openssl genrsa -out "$CLIENT_KEY_FILE" 4096
@@ -140,12 +144,12 @@ create_certs() {
 
   echo "extendedKeyUsage = clientAuth" > extfile-client.cnf
   echo "Generating Client Cert..."
-  openssl x509 -req -days 365 -sha256 -in "$CLIENT_CSR_FILE" -CA "$CA_FILE" -CAkey "$CA_PRIVATE_KEY_FILE" -passin "pass:$CA_PASSWORD" -CAcreateserial -out "$CLIENT_CERT_FILE" -extfile extfile-client.cnf
+  openssl x509 -req -days 365 -sha256 -in "$CLIENT_CSR_FILE" -CA "$CA_CERT_FILE" -CAkey "$CA_KEY_FILE" -passin "pass:$CA_PASSWORD" -CAcreateserial -out "$CLIENT_CERT_FILE" -extfile extfile-client.cnf
 
   rm -v "$CLIENT_CSR_FILE" "$SERVER_CSR_FILE" extfile.cnf extfile-client.cnf
-  zip -j cert.zip "$CA_FILE" "$CLIENT_CERT_FILE" "$CLIENT_KEY_FILE"
-  chmod -v 0400 "$CA_PRIVATE_KEY_FILE" "$CLIENT_KEY_FILE" "$SERVER_KEY_FILE"
-  chmod -v 0444 "$CA_FILE" "$SERVER_CERT_FILE" "$CLIENT_CERT_FILE"
+  zip -j cert.zip "$CA_CERT_FILE" "$CLIENT_CERT_FILE" "$CLIENT_KEY_FILE"
+  chmod -v 0400 "$CA_KEY_FILE" "$CLIENT_KEY_FILE" "$SERVER_KEY_FILE"
+  chmod -v 0444 "$CA_CERT_FILE" "$SERVER_CERT_FILE" "$CLIENT_CERT_FILE"
   echo "Cert files generated in folder $FULL_CERT_PATH!"
 }
 
@@ -157,7 +161,7 @@ configure_docker() {
 
   echo "Configuring docker for TLS socket: file $DOCKER_CONF_ABSOLUTE_PATH"
 
-  REQUIRED_CERTS=("$FULL_CERT_PATH/$CA_FILE" "$FULL_CERT_PATH/$SERVER_CERT_FILE" "$FULL_CERT_PATH/$SERVER_KEY_FILE")
+  REQUIRED_CERTS=("$FULL_CERT_PATH/$CA_CERT_FILE" "$FULL_CERT_PATH/$SERVER_CERT_FILE" "$FULL_CERT_PATH/$SERVER_KEY_FILE")
 
   MISSING_CERTS=false
   for cert in "${REQUIRED_CERTS[@]}"; do
@@ -205,7 +209,7 @@ configure_docker() {
   NEW_CONFIG=$(cat <<EOF
 [Service]
 ExecStart=
-ExecStart=$DOCKERD_PATH --tls --tlsverify --tlscacert=$FULL_CERT_PATH/$CA_FILE --tlscert=$FULL_CERT_PATH/$SERVER_CERT_FILE --tlskey=$FULL_CERT_PATH/$SERVER_KEY_FILE -H=172.17.0.1:2376 -H=fd://
+ExecStart=$DOCKERD_PATH --tls --tlsverify --tlscacert=$FULL_CERT_PATH/$CA_CERT_FILE --tlscert=$FULL_CERT_PATH/$SERVER_CERT_FILE --tlskey=$FULL_CERT_PATH/$SERVER_KEY_FILE -H=172.17.0.1:2376 -H=fd://
 EOF
   )
 
@@ -263,9 +267,20 @@ ensure_pipx() {
   pipx ensurepath --global
 }
 
+ensure_gh() {
+  (type -p wget >/dev/null || (sudo apt update && sudo apt-get install wget -y)) \
+	&& sudo mkdir -p -m 755 /etc/apt/keyrings \
+        && out=$(mktemp) && wget -nv -O$out https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+        && cat $out | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null \
+	&& sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+	&& echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+	&& sudo apt update \
+	&& sudo apt install gh -y
+}
+
 
 install_ctfd() {
-  CTFD_DOCKER_PLUGIN="CTFd-Docker-Challenges"
+  CTFD_DOCKER_PLUGIN=$(basename "$DOCKER_PLUGIN_REPO")
   DOCKER_COMPOSE_FILE="docker-compose.yml"
 
   PLUGIN_PATH="$WORKING_FOLDER/$CTFD_DOCKER_PLUGIN"
@@ -286,7 +301,7 @@ EOF
     )
 
   echo "Cloning CTFd-Docker-Challenges plugin..."
-  git -C "$WORKING_FOLDER" clone https://github.com/polycyber/CTFd-Docker-Challenges
+  git -C "$WORKING_FOLDER" clone "$DOCKER_PLUGIN_REPO"
   echo "CTFd-Docker-Challenges plugin cloned!"
 
   if [ ! -f "$DOCKER_COMPOSE_PATH" ]; then
