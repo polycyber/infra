@@ -1,7 +1,7 @@
 ---
 services:
   ctfd:
-    image: ctfd/ctfd:3.7.5
+    image: ctfd/ctfd:latest
     container_name: ctfd
     hostname: ctfd
     restart: unless-stopped
@@ -17,12 +17,12 @@ services:
     volumes:
       - ./data/CTFd/logs:/var/log/CTFd
       - ./data/CTFd/uploads:/var/uploads
-      - ./CTFd-Docker-Challenges/docker_challenges:/opt/CTFd/CTFd/plugins/docker_challenges:ro
+      - ../CTFd-Docker-Challenges/docker_challenges:/opt/CTFd/CTFd/plugins/docker_challenges:ro
     depends_on:
       - redis
     networks:
-        default:
-        internal:
+      - default
+      - internal
 
   caddy:
   # https://caddyserver.com/docs/running#docker-compose
@@ -42,7 +42,7 @@ services:
     depends_on:
       - ctfd
     networks:
-        default:
+      - default
 
 
   maria-db:
@@ -60,7 +60,7 @@ services:
     volumes:
       - ./data/mysql:/var/lib/mysql
     networks:
-        internal:
+      - internal
     # This command is required to set important mariadb defaults
     command: [mysqld, --character-set-server=utf8mb4, --collation-server=utf8mb4_unicode_ci, --wait_timeout=28800, --log-warnings=0]
 

@@ -28,7 +28,7 @@ CLIENT_CERT_FILE="client-cert.pem"
 
 # Details for docker deployment
 HOST="127.0.0.11"
-DOCKER_CONTAINER_IP="172.18.0.2"
+DOCKER_CONTAINER_IP="172.20.0.2"
 
 # Details for CTFd settings and challenge repo settings
 
