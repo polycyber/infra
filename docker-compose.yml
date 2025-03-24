@@ -14,9 +14,11 @@ services:
       - ACCESS_LOG=-
       - ERROR_LOG=-
       - REVERSE_PROXY=true
+      - SECRET_KEY=SecretKeyHere
     volumes:
       - ./data/CTFd/logs:/var/log/CTFd
       - ./data/CTFd/uploads:/var/uploads
+      - ./data/CTFd/themes:/opt/CTFd/CTFd/themes
       - ../CTFd-Docker-Challenges/docker_challenges:/opt/CTFd/CTFd/plugins/docker_challenges:ro
     depends_on:
       - redis
@@ -43,7 +45,6 @@ services:
       - ctfd
     networks:
       - default
-
 
   maria-db:
   # Would have preferred an alpine postresql image but postgresql is not supported officially supported
