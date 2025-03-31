@@ -4,19 +4,41 @@
 if [ "$EUID" -ne 0 ]; then
     echo "This script must be run as root. Please enter your password."
     exec sudo bash "$0" "$@"
-else 
+else
   echo "Running script as root..."
 fi
 
-GENERATE_CERTS="true"
-CONFIGURE_DOCKER="true"
+# Default values
+GENERATE_CERTS="false"
+CONFIGURE_DOCKER="false"
+WORKING_FOLDER="/home/$USER"
+CA_PASSWORD="changeme"
+
+# Parse command-line arguments
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --working-folder) WORKING_FOLDER="$2"; shift ;;
+        --ca-password) CA_PASSWORD="$2"; shift ;;
+        --configure-docker) CONFIGURE_DOCKER="true" ;;
+        --generate-certs) GENERATE_CERTS="true" ;;
+        *) echo "Unknown parameter passed: $1"; exit 1 ;;
+    esac
+    shift
+done
+
+# Ensure CA_PASSWORD is set
+if [ "$CA_PASSWORD" = "changeme" ]; then
+    echo "CA_PASSWORD is not set. Please provide a password for the CA."
+    read -sp "Enter CA_PASSWORD: " CA_PASSWORD
+    echo
+    if [ -z "$CA_PASSWORD" ]; then
+        echo "CA_PASSWORD cannot be empty. Exiting."
+        exit 1
+    fi
+fi
 
 USER=${SUDO_USER:-$USER}
-
-WORKING_FOLDER="/home/$USER"
 FULL_CERT_PATH="$WORKING_FOLDER/cert"
-
-CA_PASSWORD="changeme"
 
 # Cert files
 CA_KEY_FILE="ca-key.pem"
@@ -31,7 +53,6 @@ HOST="127.0.0.11"
 DOCKER_CONTAINER_IP="172.20.0.2"
 
 # Details for CTFd settings and challenge repo settings
-
 DOCKER_PLUGIN_REPO="https://github.com/polycyber/CTFd-Docker-Challenges"
 
 # nano ctfd_server_setup.sh && chmod +x ctfd_server_setup.sh && ./ctfd_server_setup.sh
@@ -67,7 +88,6 @@ main() {
 
   install_ctfd
 }
-
 
 ensure_docker() {
   if command -v docker >/dev/null 2>&1; then
@@ -107,7 +127,7 @@ post_install_docker() {
 create_certs() {
   SERVER_CSR_FILE="server.csr"
   CLIENT_CSR_FILE="client.csr"
-  
+
   CERT_COUNTRY="CA"
   CERT_STATE="Quebec"
   CERT_CITY="Montreal"
@@ -115,7 +135,6 @@ create_certs() {
   CERT_OU="PolyCyber"
   CERT_CN="polycyber.io"
   CERT_EMAIL_ADDRESS="infra@polycyber.io"
-
 
   echo "Creating certs in folder $FULL_CERT_PATH..."
   mkdir -p "$FULL_CERT_PATH"
@@ -126,6 +145,8 @@ create_certs() {
   echo "Generating CA..."
   openssl req -new -x509 -days 365 -key "$CA_KEY_FILE" -passin pass:$CA_PASSWORD -sha256 -out "$CA_CERT_FILE" \
     -subj "/C=$CERT_COUNTRY/ST=$CERT_STATE/L=$CERT_CITY/O=$CERT_ORGANISATION/OU=$CERT_OU/CN=$CERT_CN/emailAddress=$CERT_EMAIL_ADDRESS"
+  cat "$CA_CERT_FILE" >> /etc/ssl/certs/ca-certificates.crt
+  update-ca-certificates
 
   echo "Generating Server Key..."
   openssl genrsa -out "$SERVER_KEY_FILE" 4096
@@ -157,7 +178,6 @@ configure_docker() {
   DOCKER_CONF_PATH="/etc/systemd/system/docker.service.d"
   DOCKER_CONF_FILE="override.conf"
   DOCKER_CONF_ABSOLUTE_PATH="$DOCKER_CONF_PATH/$DOCKER_CONF_FILE"
-
 
   echo "Configuring docker for TLS socket: file $DOCKER_CONF_ABSOLUTE_PATH"
 
@@ -193,7 +213,7 @@ configure_docker() {
         mv "$file" "$file.bk" || true
       fi
     done
-  else 
+  else
     echo "$DOCKER_CONF_PATH doesn't exist, creating it instead..."
     mkdir -p "$DOCKER_CONF_PATH"
   fi
@@ -221,18 +241,17 @@ EOF
       echo "Updating Docker configuration..."
       mv "$DOCKER_CONF_ABSOLUTE_PATH" "$DOCKER_CONF_ABSOLUTE_PATH.bk" || true
       echo "$NEW_CONFIG" > "$DOCKER_CONF_ABSOLUTE_PATH"
-      
+
       systemctl daemon-reload
       systemctl restart docker.service
     fi
   else
     echo "Creating Docker configuration..."
     echo "$NEW_CONFIG" > "$DOCKER_CONF_ABSOLUTE_PATH"
-    
+
     systemctl daemon-reload
     systemctl restart docker.service
   fi
-
 
   if netstat -lntp | grep -q dockerd; then
     echo "Docker configuration complete!"
@@ -240,7 +259,6 @@ EOF
     echo "Error configuring Docker: port not open"
   fi
 }
-
 
 ensure_pipx() {
   # Pipx needs to be version >=1.6 for global flag to work, and Ubuntu repo currently only has 1.4, so we need to install it with itself instead and purge the 1.4 version (see issue https://github.com/pypa/pipx/issues/1481)
@@ -277,7 +295,6 @@ ensure_gh() {
 	&& sudo apt update \
 	&& sudo apt install gh -y
 }
-
 
 install_ctfd() {
   CTFD_DOCKER_PLUGIN=$(basename "$DOCKER_PLUGIN_REPO")
