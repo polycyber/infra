@@ -12,7 +12,7 @@ fi
 GENERATE_CERTS="false"
 CONFIGURE_DOCKER="false"
 WORKING_FOLDER="/home/$USER"
-CA_PASSWORD="changeme"
+CA_PASSWORD=""
 
 # Parse command-line arguments
 while [[ "$#" -gt 0 ]]; do
@@ -25,17 +25,6 @@ while [[ "$#" -gt 0 ]]; do
     esac
     shift
 done
-
-# Ensure CA_PASSWORD is set
-if [ "$CA_PASSWORD" = "changeme" ]; then
-    echo "CA_PASSWORD is not set. Please provide a password for the CA."
-    read -sp "Enter CA_PASSWORD: " CA_PASSWORD
-    echo
-    if [ -z "$CA_PASSWORD" ]; then
-        echo "CA_PASSWORD cannot be empty. Exiting."
-        exit 1
-    fi
-fi
 
 USER=${SUDO_USER:-$USER}
 FULL_CERT_PATH="$WORKING_FOLDER/cert"
@@ -79,6 +68,17 @@ main() {
   ensure_docker
 
   if [ "$GENERATE_CERTS" = "true" ]; then
+
+    # Ensure CA_PASSWORD is set
+    if [ "$CA_PASSWORD" = "" ]; then
+        echo "CA_PASSWORD is not set. Please provide a password for the CA."
+        read -sp "Enter CA_PASSWORD: " CA_PASSWORD
+        echo
+        if [ -z "$CA_PASSWORD" ]; then
+            echo "CA_PASSWORD cannot be empty. Exiting."
+            exit 1
+        fi
+    fi
     create_certs
   fi
 
