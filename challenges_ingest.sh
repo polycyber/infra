@@ -19,7 +19,7 @@ for category in "$CHALLENGE_PATH"/*; do
           docker_image=$(grep '^  docker_image:' "$challenge_yml" | sed -E 's/^  docker_image: "([^"]+):[^"]+"/\1/')
           echo "Building Challenge: $challenge_name, Docker Image: $docker_image"
           if [ "$BUILD_DOCKERS" = "true" ]; then
-            docker build . -t "$docker_image" -f "$category/$challenge_name"/Dockerfile
+            $(cd "$category/$challenge_name" && docker build . -t "$docker_image" -f "$category/$challenge_name/Dockerfile")
           else 
             echo "docker build . -t $docker_image -f $category/$challenge_name/Dockerfile"
           fi
@@ -38,6 +38,8 @@ for category in "$CHALLENGE_PATH"/*; do
     for challenge in "$category"/*; do
       if [ -d "$challenge" ]; then
         challenge_name=$(basename "$challenge")
+        echo "Installing $challenge_name..."
+        echo "ctf challenge install '$category/$challenge_name'"
         ctf challenge install "$category/$challenge_name"
       fi
     done
