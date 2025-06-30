@@ -8,6 +8,10 @@ REPO_PATH="$WORKING_FOLDER/$CTF_REPO"
 CHALLENGE_PATH="$REPO_PATH/challenges"
 BUILD_DOCKERS="false"
 
+# if not ctfcli installed
+# log_info "Installing CTFcli..."
+# pipx install --global ctfcli
+
 for category in "$CHALLENGE_PATH"/*; do
   if [ -d "$category" ]; then
     for challenge in "$category"/*; do

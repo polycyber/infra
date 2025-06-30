@@ -1,316 +1,417 @@
 #!/bin/bash
 
-# Ensure the script is run as root, otherwise prompt for sudo password
-if [ "$EUID" -ne 0 ]; then
-    echo "This script must be run as root. Please enter your password."
-    exec sudo bash "$0" "$@"
-else
-  echo "Running script as root..."
-fi
+# nano ctfd_server_setup.sh && chmod +x ctfd_server_setup.sh && ./ctfd_server_setup.sh --ctfd-url localhost
 
-# Default values
-GENERATE_CERTS="false"
-CONFIGURE_DOCKER="false"
-WORKING_FOLDER="/home/$USER"
-CA_PASSWORD=""
+set -euo pipefail  # Exit on error, undefined variables, and pipe failures
 
-# Parse command-line arguments
-while [[ "$#" -gt 0 ]]; do
-    case $1 in
-        --working-folder) WORKING_FOLDER="$2"; shift ;;
-        --ca-password) CA_PASSWORD="$2"; shift ;;
-        --configure-docker) CONFIGURE_DOCKER="true" ;;
-        --generate-certs) GENERATE_CERTS="true" ;;
-        *) echo "Unknown parameter passed: $1"; exit 1 ;;
-    esac
-    shift
-done
+readonly SCRIPT_NAME="$(basename "$0")"
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-USER=${SUDO_USER:-$USER}
-FULL_CERT_PATH="$WORKING_FOLDER/cert"
+readonly RED='\033[0;31m'
+readonly GREEN='\033[0;32m'
+readonly YELLOW='\033[1;33m'
+readonly BLUE='\033[0;34m'
+readonly NC='\033[0m' # No Color
 
-# Cert files
-CA_KEY_FILE="ca-key.pem"
-CA_CERT_FILE="ca-cert.pem"
-SERVER_KEY_FILE="server-key.pem"
-SERVER_CERT_FILE="server-cert.pem"
-CLIENT_KEY_FILE="client-key.pem"
-CLIENT_CERT_FILE="client-cert.pem"
+log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
+log_success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
+log_warning() { echo -e "${YELLOW}[WARNING]${NC} $*"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 
-# Details for docker deployment
-HOST="127.0.0.11"
-DOCKER_CONTAINER_IP="172.20.0.2"
-
-# Details for CTFd settings and challenge repo settings
-DOCKER_PLUGIN_REPO="https://github.com/polycyber/CTFd-Docker-Challenges"
-
-# nano ctfd_server_setup.sh && chmod +x ctfd_server_setup.sh && ./ctfd_server_setup.sh
-# scp -r <user>@<server_ip>:/home/<remote_user>/cert/cert.zip <local_path_for_cert>
-main() {
-  # Configure silent app restart for Ubuntu 22.04
-  if grep -q "Ubuntu 22.04" /etc/os-release; then
-    # Ensure needrestart auto-restarts services
-    NEEDRESTART_CONF="/etc/needrestart/needrestart.conf"
-    RESTART_CONFIG="\$nrconf{restart} = 'a'"
-
-    if ! grep -qF "$RESTART_CONFIG" "$NEEDRESTART_CONF"; then
-      echo "$RESTART_CONFIG" >> "$NEEDRESTART_CONF"
-      echo "Configured needrestart to automatically restart services after upgrade."
-    fi
-  fi
-
-  # Run apt update and upgrade without interaction
-  export DEBIAN_FRONTEND=noninteractive
-  apt update
-  apt upgrade -yq
-
-  ensure_pipx
-  ensure_docker
-
-  if [ "$GENERATE_CERTS" = "true" ]; then
-
-    # Ensure CA_PASSWORD is set
-    if [ "$CA_PASSWORD" = "" ]; then
-        echo "CA_PASSWORD is not set. Please provide a password for the CA."
-        read -sp "Enter CA_PASSWORD: " CA_PASSWORD
-        echo
-        if [ -z "$CA_PASSWORD" ]; then
-            echo "CA_PASSWORD cannot be empty. Exiting."
-            exit 1
-        fi
-    fi
-    create_certs
-  fi
-
-  if [ "$CONFIGURE_DOCKER" = "true" ]; then
-    configure_docker
-  fi
-
-  install_ctfd
+error_exit() {
+    log_error "$1"
+    exit "${2:-1}"
 }
 
-ensure_docker() {
-  if command -v docker >/dev/null 2>&1; then
-    echo "Docker is already installed."
-  else
-    echo "Docker is not installed. Installing Docker..."
-    apt-get install -y apt-transport-https ca-certificates curl software-properties-common net-tools zip
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-    apt-get update
-    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+# Check if running as root, otherwise re-exec with sudo
+ensure_root() {
+    if [[ $EUID -ne 0 ]]; then
+        log_info "This script must be run as root. Re-executing with sudo..."
+        exec sudo bash "$0" "$@"
+    fi
+    log_info "Running script as root..."
+}
+
+declare -A CONFIG=(
+    [GENERATE_CERTS]="true"
+    [CONFIGURE_DOCKER]="true"
+    [WORKING_DIR]="/home/${SUDO_USER:-$USER}"
+)
+
+declare -A CERT_CONFIG=(
+    [COUNTRY]="CA"
+    [STATE]="Quebec"
+    [CITY]="Montreal"
+    [ORGANISATION]="PolyCyber"
+    [OU]="PolyCyber"
+    [CN]="polycyber.io"
+    [EMAIL]="infra@polycyber.io"
+)
+
+declare -A CERT_FILES=(
+    [CA_KEY]="ca-key.pem"
+    [CA_CERT]="ca-cert.pem"
+    [SERVER_KEY]="server-key.pem"
+    [SERVER_CERT]="server-cert.pem"
+    [CLIENT_KEY]="client-key.pem"
+    [CLIENT_CERT]="client-cert.pem"
+)
+
+readonly HOST="127.0.0.11"
+readonly DOCKER_CONTAINER_IP="172.20.0.2"
+readonly DOCKER_PLUGIN_REPO="https://github.com/polycyber/CTFd-Docker-Challenges"
+
+show_usage() {
+    cat << EOF
+Usage: $SCRIPT_NAME [OPTIONS]
+
+Options:
+    --working-folder DIR    Set working directory (default: /home/\$USER)
+    --configure-docker      Configure Docker with TLS
+    --generate-certs        Generate TLS certificates
+    --ctfd-url URL         Set CTFd URL (mandatory)
+    --help                 Show this help message
+
+Examples:
+    $SCRIPT_NAME --generate-certs --ca-password mypassword
+    $SCRIPT_NAME --configure-docker --working-folder /opt/ctfd
+    $SCRIPT_NAME --generate-certs --configure-docker --ctfd-url example.com
+EOF
+}
+
+parse_arguments() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --working-folder)
+                [[ -n ${2:-} ]] || error_exit "Missing value for --working-folder"
+                CONFIG[WORKING_DIR]="$2"
+                shift 2
+                ;;
+            --configure-docker)
+                CONFIG[CONFIGURE_DOCKER]="true"
+                shift
+                ;;
+            --generate-certs)
+                CONFIG[GENERATE_CERTS]="true"
+                shift
+                ;;
+            --ctfd-url)
+                [[ -n ${2:-} ]] || error_exit "Missing value for --ctfd-url"
+                CONFIG[CTFD_URL]="$2"
+                shift 2
+                ;;
+            --help)
+                show_usage
+                exit 0
+                ;;
+            *)
+                error_exit "Unknown parameter: $1"
+                ;;
+        esac
+    done
+
+    [[ -n ${CONFIG[CTFD_URL]:-} ]] || error_exit "Error: --ctfd-url is mandatory and must be specified."
+}
+
+generate_password() {
+    local length="${1:-15}"
+    openssl rand -base64 "$((length * 3 / 4))" | tr -d '+/=' | head -c "$length"
+}
+
+update_system() {
+    log_info "Updating system packages..."
+    export DEBIAN_FRONTEND=noninteractive
+    
+    apt-get update -qq
+    apt-get upgrade -y -qq
+    DEBIAN_FRONTEND=noninteractive apt-get install -qq -y \
+        apt-transport-https \
+        ca-certificates \
+        curl \
+        software-properties-common \
+        net-tools \
+        zip \
+        git \
+        python3-pip \
+        wget
+    
+    log_success "System packages updated"
+}
+
+install_docker() {
+    if command -v docker >/dev/null 2>&1; then
+        log_info "Docker is already installed"
+        return 0
+    fi
+
+    log_info "Installing Docker..."
+    
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
+        gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] \
+          https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | \
+        tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+    apt-get update -qq
+    apt-get install -qq -y \
+        docker-ce \
+        docker-ce-cli \
+        containerd.io \
+        docker-buildx-plugin \
+        docker-compose-plugin
 
     if command -v docker >/dev/null 2>&1; then
-        echo "Docker has been successfully installed."
-        post_install_docker
+        log_success "Docker installed successfully"
+        setup_docker_group
     else
-        echo "Docker installation failed."
+        error_exit "Docker installation failed"
     fi
-  fi
 }
 
-post_install_docker() {
-  echo "Applying post-install steps for Docker..."
-  # Create the docker group if it doesn't exist
-  if ! getent group docker; then
-    groupadd docker
-  fi
+setup_docker_group() {
+    log_info "Setting up Docker group..."
+    
+    if ! getent group docker >/dev/null; then
+        groupadd docker
+    fi
 
-  # Add the non-root user to the docker group
-  USER=${SUDO_USER:-$USER}
-  usermod -aG docker $USER
+    local user="${SUDO_USER:-$USER}"
+    usermod -aG docker "$user"
 
-  echo "Docker post-install steps completed. You will be logged out to force the user's groups to be correctly loaded on the new session. Run the script again to complete the setup."
-  pkill -KILL -u "$USER"
+    log_warning "User '$user' added to docker group"
+    log_warning "You may need to log out and back in for group changes to take effect"
 }
 
-create_certs() {
-  SERVER_CSR_FILE="server.csr"
-  CLIENT_CSR_FILE="client.csr"
+install_pipx() {
+    log_info "Installing pipx..."
+    local pipx_version
+    pipx_version=$(pipx --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1 || echo "")
 
-  CERT_COUNTRY="CA"
-  CERT_STATE="Quebec"
-  CERT_CITY="Montreal"
-  CERT_ORGANISATION="PolyCyber"
-  CERT_OU="PolyCyber"
-  CERT_CN="polycyber.io"
-  CERT_EMAIL_ADDRESS="infra@polycyber.io"
-
-  echo "Creating certs in folder $FULL_CERT_PATH..."
-  mkdir -p "$FULL_CERT_PATH"
-  cd "$FULL_CERT_PATH" || return
-
-  echo "Generating CA Private Key..."
-  openssl genrsa -aes256 -passout pass:$CA_PASSWORD -out "$CA_KEY_FILE" 4096
-  echo "Generating CA..."
-  openssl req -new -x509 -days 365 -key "$CA_KEY_FILE" -passin pass:$CA_PASSWORD -sha256 -out "$CA_CERT_FILE" \
-    -subj "/C=$CERT_COUNTRY/ST=$CERT_STATE/L=$CERT_CITY/O=$CERT_ORGANISATION/OU=$CERT_OU/CN=$CERT_CN/emailAddress=$CERT_EMAIL_ADDRESS"
-  cat "$CA_CERT_FILE" >> /etc/ssl/certs/ca-certificates.crt
-  update-ca-certificates
-
-  echo "Generating Server Key..."
-  openssl genrsa -out "$SERVER_KEY_FILE" 4096
-  echo "Generating Server CSR..."
-  openssl req -subj "/CN=$HOST" -sha256 -new -key "$SERVER_KEY_FILE" -out "$SERVER_CSR_FILE"
-
-  echo "subjectAltName = DNS:$HOST,IP:$DOCKER_CONTAINER_IP
-  extendedKeyUsage = serverAuth" > extfile.cnf
-
-  echo "Generating Server Cert..."
-  openssl x509 -req -days 365 -sha256 -in "$SERVER_CSR_FILE" -CA "$CA_CERT_FILE" -CAkey "$CA_KEY_FILE" -passin "pass:$CA_PASSWORD" -CAcreateserial -out "$SERVER_CERT_FILE" -extfile extfile.cnf
-
-  echo "Generating Client Key..."
-  openssl genrsa -out "$CLIENT_KEY_FILE" 4096
-  openssl req -subj '/CN=client' -new -key "$CLIENT_KEY_FILE" -out "$CLIENT_CSR_FILE"
-
-  echo "extendedKeyUsage = clientAuth" > extfile-client.cnf
-  echo "Generating Client Cert..."
-  openssl x509 -req -days 365 -sha256 -in "$CLIENT_CSR_FILE" -CA "$CA_CERT_FILE" -CAkey "$CA_KEY_FILE" -passin "pass:$CA_PASSWORD" -CAcreateserial -out "$CLIENT_CERT_FILE" -extfile extfile-client.cnf
-
-  rm -v "$CLIENT_CSR_FILE" "$SERVER_CSR_FILE" extfile.cnf extfile-client.cnf
-  zip -j cert.zip "$CA_CERT_FILE" "$CLIENT_CERT_FILE" "$CLIENT_KEY_FILE"
-  chmod -v 0400 "$CA_KEY_FILE" "$CLIENT_KEY_FILE" "$SERVER_KEY_FILE"
-  chmod -v 0444 "$CA_CERT_FILE" "$SERVER_CERT_FILE" "$CLIENT_CERT_FILE"
-  echo "Cert files generated in folder $FULL_CERT_PATH!"
+    if [[ $pipx_version != "1.7" ]]; then
+        su - $SUDO_USER -c "python3 -m pip install --user --break-system-packages pipx"
+        su - $SUDO_USER -c "python3 -m pipx ensurepath"
+        # Manually add pipx to PATH for the specific user
+        su - $SUDO_USER -c "echo 'export PATH=\$PATH:\$HOME/.local/bin' >> ~/.bashrc"
+    fi
+    log_success "pipx installed and configured"
 }
 
-configure_docker() {
-  DOCKER_CONF_PATH="/etc/systemd/system/docker.service.d"
-  DOCKER_CONF_FILE="override.conf"
-  DOCKER_CONF_ABSOLUTE_PATH="$DOCKER_CONF_PATH/$DOCKER_CONF_FILE"
+create_certificates() {
+    local cert_dir="${CONFIG[WORKING_DIR]}/cert"
+    local ca_password
+    
+    ca_password=$(generate_password 32)
 
-  echo "Configuring docker for TLS socket: file $DOCKER_CONF_ABSOLUTE_PATH"
+    log_info "Creating certificates in $cert_dir..."
+    
+    mkdir -p "$cert_dir"
+    cd "$cert_dir" || error_exit "Cannot access certificate directory"
+    
+    log_info "Generating CA private key..."
+    openssl genrsa -aes256 -passout "pass:$ca_password" -out "${CERT_FILES[CA_KEY]}" 4096
+    
+    log_info "Generating CA certificate..."
+    openssl req -new -x509 -days 365 \
+        -key "${CERT_FILES[CA_KEY]}" \
+        -passin "pass:$ca_password" \
+        -sha256 \
+        -out "${CERT_FILES[CA_CERT]}" \
+        -subj "/C=${CERT_CONFIG[COUNTRY]}/ST=${CERT_CONFIG[STATE]}/L=${CERT_CONFIG[CITY]}/O=${CERT_CONFIG[ORGANISATION]}/OU=${CERT_CONFIG[OU]}/CN=${CERT_CONFIG[CN]}/emailAddress=${CERT_CONFIG[EMAIL]}"
+    
+    cat "${CERT_FILES[CA_CERT]}" >> /etc/ssl/certs/ca-certificates.crt
+    update-ca-certificates
+    
+    log_info "Generating server certificates..."
+    openssl genrsa -out "${CERT_FILES[SERVER_KEY]}" 4096
+    openssl req -subj "/CN=$HOST" -sha256 -new \
+        -key "${CERT_FILES[SERVER_KEY]}" \
+        -out server.csr
+    
+    cat > server-extfile.cnf << EOF
+subjectAltName = DNS:$HOST,IP:$DOCKER_CONTAINER_IP
+extendedKeyUsage = serverAuth
+EOF
+    
+    openssl x509 -req -days 365 -sha256 \
+        -in server.csr \
+        -CA "${CERT_FILES[CA_CERT]}" \
+        -CAkey "${CERT_FILES[CA_KEY]}" \
+        -passin "pass:$ca_password" \
+        -CAcreateserial \
+        -out "${CERT_FILES[SERVER_CERT]}" \
+        -extfile server-extfile.cnf
+    
+    log_info "Generating client certificates..."
+    openssl genrsa -out "${CERT_FILES[CLIENT_KEY]}" 4096
+    openssl req -subj '/CN=client' -new \
+        -key "${CERT_FILES[CLIENT_KEY]}" \
+        -out client.csr
+    
+    echo "extendedKeyUsage = clientAuth" > client-extfile.cnf
+    
+    openssl x509 -req -days 365 -sha256 \
+        -in client.csr \
+        -CA "${CERT_FILES[CA_CERT]}" \
+        -CAkey "${CERT_FILES[CA_KEY]}" \
+        -passin "pass:$ca_password" \
+        -CAcreateserial \
+        -out "${CERT_FILES[CLIENT_CERT]}" \
+        -extfile client-extfile.cnf
+    
+    rm -f server.csr client.csr server-extfile.cnf client-extfile.cnf
+    
+    zip -j cert.zip "${CERT_FILES[CA_CERT]}" "${CERT_FILES[CLIENT_CERT]}" "${CERT_FILES[CLIENT_KEY]}"
+    
+    chmod 0400 "${CERT_FILES[CA_KEY]}" "${CERT_FILES[CLIENT_KEY]}" "${CERT_FILES[SERVER_KEY]}"
+    chmod 0444 "${CERT_FILES[CA_CERT]}" "${CERT_FILES[SERVER_CERT]}" "${CERT_FILES[CLIENT_CERT]}"
+    
+    log_success "Certificates created successfully in $cert_dir"
+    log_info "Generated secrets:"
+    log_info "  CA password: $ca_password"
+}
 
-  REQUIRED_CERTS=("$FULL_CERT_PATH/$CA_CERT_FILE" "$FULL_CERT_PATH/$SERVER_CERT_FILE" "$FULL_CERT_PATH/$SERVER_KEY_FILE")
-
-  MISSING_CERTS=false
-  for cert in "${REQUIRED_CERTS[@]}"; do
-    if [ ! -f "$cert" ]; then
-      echo "Missing required certificate: $cert"
-      MISSING_CERTS=true
-    fi
-  done
-
-  if [ "$MISSING_CERTS" = true ]; then
-    if [ "$GENERATE_CERTS" = "true" ]; then
-      echo "Generating missing certificates..."
-      create_certs
-    else
-      echo "TLS certificates are missing but automatic generation is disabled."
-      read -rp "Do you want to generate the certificates now? (y/n): " USER_INPUT
-      case "$USER_INPUT" in
-          [Yy]* ) create_certs ;;
-          [Nn]* ) echo "Cannot configure Docker without certificates. Exiting."; exit 1 ;;
-          * ) echo "Invalid input. Exiting."; exit 1 ;;
-      esac
-    fi
-  fi
-
-  if [ -d "$DOCKER_CONF_PATH" ]; then
-    echo "Trying to backup any .conf file in $DOCKER_CONF_PATH..."
-    for file in "$DOCKER_CONF_PATH"/*.conf; do
-      if [ "$file" != "$DOCKER_CONF_ABSOLUTE_PATH" ]; then
-        mv "$file" "$file.bk" || true
-      fi
+configure_docker_tls() {
+    local cert_dir="${CONFIG[WORKING_DIR]}/cert"
+    local docker_conf_dir="/etc/systemd/system/docker.service.d"
+    local docker_conf_file="$docker_conf_dir/override.conf"
+    
+    log_info "Configuring Docker for TLS..."
+    
+    local required_certs=(
+        "$cert_dir/${CERT_FILES[CA_CERT]}"
+        "$cert_dir/${CERT_FILES[SERVER_CERT]}"
+        "$cert_dir/${CERT_FILES[SERVER_KEY]}"
+    )
+    
+    local missing_certs=()
+    for cert in "${required_certs[@]}"; do
+        if [[ ! -f $cert ]]; then
+            missing_certs+=("$cert")
+        fi
     done
-  else
-    echo "$DOCKER_CONF_PATH doesn't exist, creating it instead..."
-    mkdir -p "$DOCKER_CONF_PATH"
-  fi
-  DOCKERD_PATH=$(command -v dockerd)
-
-  if [ -z "$DOCKERD_PATH" ]; then
-    echo "Error: dockerd binary not found. Is Docker installed?"
-    exit 1
-  else
-    echo "Using dockerd path: $DOCKERD_PATH"
-  fi
-
-  NEW_CONFIG=$(cat <<EOF
+    
+    if [[ ${#missing_certs[@]} -gt 0 ]]; then
+        if [[ ${CONFIG[GENERATE_CERTS]} == "true" ]]; then
+            log_info "Generating missing certificates..."
+            create_certificates
+        else
+            log_error "Missing certificates: ${missing_certs[*]}"
+            read -p "Generate certificates now? (y/N): " -r
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                CONFIG[GENERATE_CERTS]="true"
+                create_certificates
+            else
+                error_exit "Cannot configure Docker without certificates"
+            fi
+        fi
+    fi
+    
+    mkdir -p "$docker_conf_dir"
+    
+    if [[ -f $docker_conf_file ]]; then
+        cp "$docker_conf_file" "$docker_conf_file.backup"
+    fi
+    
+    local dockerd_path
+    dockerd_path=$(command -v dockerd) || error_exit "dockerd not found"
+    
+    cat > "$docker_conf_file" << EOF
 [Service]
 ExecStart=
-ExecStart=$DOCKERD_PATH --tls --tlsverify --tlscacert=$FULL_CERT_PATH/$CA_CERT_FILE --tlscert=$FULL_CERT_PATH/$SERVER_CERT_FILE --tlskey=$FULL_CERT_PATH/$SERVER_KEY_FILE -H=172.17.0.1:2376 -H=fd://
+ExecStart=$dockerd_path --tls --tlsverify --tlscacert=$cert_dir/${CERT_FILES[CA_CERT]} --tlscert=$cert_dir/${CERT_FILES[SERVER_CERT]} --tlskey=$cert_dir/${CERT_FILES[SERVER_KEY]} -H=172.17.0.1:2376 -H=fd://
 EOF
-  )
-
-  if [ -f "$DOCKER_CONF_ABSOLUTE_PATH" ]; then
-    EXISTING_CONFIG=$(cat "$DOCKER_CONF_ABSOLUTE_PATH")
-    if [ "$EXISTING_CONFIG" = "$NEW_CONFIG" ]; then
-      echo "Docker configuration is up to date."
-    else
-      echo "Updating Docker configuration..."
-      mv "$DOCKER_CONF_ABSOLUTE_PATH" "$DOCKER_CONF_ABSOLUTE_PATH.bk" || true
-      echo "$NEW_CONFIG" > "$DOCKER_CONF_ABSOLUTE_PATH"
-
-      systemctl daemon-reload
-      systemctl restart docker.service
-    fi
-  else
-    echo "Creating Docker configuration..."
-    echo "$NEW_CONFIG" > "$DOCKER_CONF_ABSOLUTE_PATH"
-
+    
     systemctl daemon-reload
     systemctl restart docker.service
-  fi
-
-  if netstat -lntp | grep -q dockerd; then
-    echo "Docker configuration complete!"
-  else
-    echo "Error configuring Docker: port not open"
-  fi
-}
-
-ensure_pipx() {
-  # Pipx needs to be version >=1.6 for global flag to work, and Ubuntu repo currently only has 1.4, so we need to install it with itself instead and purge the 1.4 version (see issue https://github.com/pypa/pipx/issues/1481)
-  PIPX_VERSION=$(pipx --version 2>/dev/null)
-  if [[ $PIPX_VERSION =~ ([0-9]+\.[0-9]+) ]]; then
-    INSTALLED_VERSION="${BASH_REMATCH[1]}"
-  else
-    INSTALLED_VERSION=""
-  fi
-
-  if [[ -z "$INSTALLED_VERSION" || "$INSTALLED_VERSION" != "1.7" ]]; then
-    echo "Installing pipx..."
-    apt install -y pipx # Install 1.4
-    pipx install pipx # Install 1.7 in ~/.local/bin/
-    apt purge -y --autoremove pipx # Remove 1.4
-    ~/.local/bin/pipx install --global pipx # Install 1.7 in /usr/local/bin/pipx
-  fi
-
-  if [ -f ~/.local/bin/pipx ]; then
-    echo "Uninstalling pipx from ~/.local/bin/..."
-    pipx uninstall pipx # Remove 1.7 from ~/.local/
-  fi
-
-  pipx ensurepath --global
-}
-
-ensure_gh() {
-  (type -p wget >/dev/null || (sudo apt update && sudo apt-get install wget -y)) \
-	&& sudo mkdir -p -m 755 /etc/apt/keyrings \
-        && out=$(mktemp) && wget -nv -O$out https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-        && cat $out | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null \
-	&& sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
-	&& echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
-	&& sudo apt update \
-	&& sudo apt install gh -y
+    
+    if netstat -lntp 2>/dev/null | grep -q dockerd; then
+        log_success "Docker TLS configuration complete"
+    else
+        error_exit "Docker TLS configuration failed - port not listening"
+    fi
 }
 
 install_ctfd() {
-  CTFD_DOCKER_PLUGIN=$(basename "$DOCKER_PLUGIN_REPO")
-  DOCKER_COMPOSE_FILE="docker-compose.yml"
+    local working_dir="${CONFIG[WORKING_DIR]}"
+    local plugin_name="CTFd-Docker-Challenges"
+    local plugin_path="$working_dir/$plugin_name"
+    local compose_file="$working_dir/infra/docker-compose.yml"
+    
+    log_info "Installing CTFd..."
+    
+    if [[ ! -d $plugin_path ]]; then
+        log_info "Cloning CTFd Docker Challenges plugin..."
+        git -C "$working_dir" clone "$DOCKER_PLUGIN_REPO"
+    else
+        log_info "Plugin already exists, updating..."
+        git -C "$plugin_path" pull
+    fi
+    
+    if [[ -f $compose_file ]]; then
+        cp "$compose_file" "$compose_file.backup"
+    fi
+    
+    log_info "Generating secure secrets..."
+    
+    local secret_key
+    local db_password
+    local db_root_password
+    
+    secret_key=$(generate_password 32)
+    db_password=$(generate_password 16)
+    db_root_password=$(generate_password 16)
+    
+    log_info "Updating configuration with new secrets..."
+    
+    sed -i "s/SECRET_KEY=.*/SECRET_KEY=$secret_key/" "$compose_file"
+    
+    sed -i "s/db_password/$db_password/g" "$compose_file"
+    sed -i "s/db_root_password/$db_root_password/g" "$compose_file"
+    log_info "Configuration updated with new secrets"
 
-  PLUGIN_PATH="$WORKING_FOLDER/$CTFD_DOCKER_PLUGIN"
-  DOCKER_COMPOSE_PATH="$WORKING_FOLDER/infra/$DOCKER_COMPOSE_FILE"
-
-  echo "Cloning CTFd-Docker-Challenges plugin..."
-  git -C "$WORKING_FOLDER" clone "$DOCKER_PLUGIN_REPO"
-  echo "CTFd-Docker-Challenges plugin cloned!"
-
-  docker compose -f "$DOCKER_COMPOSE_PATH" up -d
-  echo "CTFd started!"
-
-  pipx install --global ctfcli
+    local ctfd_url="${CONFIG[CTFD_URL]}"
+    if [[ $ctfd_url == "localhost" ]]; then
+        error_exit "CTFd URL must be specified with --ctfd-url"
+    fi
+    
+    sed -i "s/BASE_DOMAIN=.*/BASE_DOMAIN=$ctfd_url/" "$compose_file"
+    
+    log_info "To start the CTFd containers, please run the following command in a properly configured session:"
+    echo "\tdocker compose -f "$compose_file" up -d"
+    
+    log_success "CTFd installation complete!"
+    log_info "Download certificates with: scp -r ${SUDO_USER:-$USER}@<server_ip>:${CONFIG[WORKING_DIR]}/cert/cert.zip <local_path>"
+    
+    log_info "Generated secrets:"
+    log_info "  Secret Key: $secret_key"
+    log_info "  DB Password: $db_password"
+    log_info "  DB Root Password: $db_root_password"
 }
 
-main
+main() {
+    log_info "Starting CTFd server setup..."
+    
+    update_system
+    
+    install_pipx
+    install_docker
+    
+    if [[ ${CONFIG[GENERATE_CERTS]} == "true" ]]; then
+        create_certificates
+    fi
+    
+    if [[ ${CONFIG[CONFIGURE_DOCKER]} == "true" ]]; then
+        configure_docker_tls
+    fi
+    
+    install_ctfd
+    
+    log_success "CTFd server setup completed successfully!"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    ensure_root "$@"
+    parse_arguments "$@"
+    main
+fi
