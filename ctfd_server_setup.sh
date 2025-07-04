@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# nano ctfd_server_setup.sh && chmod +x ctfd_server_setup.sh && ./ctfd_server_setup.sh --ctfd-url localhost
+# nano ctfd_server_setup.sh && chmod +x ctfd_server_setup.sh && ./ctfd_server_setup.sh --ctfd-url http://192.168.56.101
 
 set -euo pipefail  # Exit on error, undefined variables, and pipe failures
 
@@ -23,7 +23,6 @@ error_exit() {
     exit "${2:-1}"
 }
 
-# Check if running as root, otherwise re-exec with sudo
 ensure_root() {
     if [[ $EUID -ne 0 ]]; then
         log_info "This script must be run as root. Re-executing with sudo..."
@@ -67,15 +66,12 @@ Usage: $SCRIPT_NAME [OPTIONS]
 
 Options:
     --working-folder DIR    Set working directory (default: /home/\$USER)
-    --configure-docker      Configure Docker with TLS
-    --generate-certs        Generate TLS certificates
-    --ctfd-url URL         Set CTFd URL (mandatory)
-    --help                 Show this help message
+    --ctfd-url URL          Set CTFd URL (mandatory)
+    --help                  Show this help message
 
 Examples:
-    $SCRIPT_NAME --generate-certs --ca-password mypassword
-    $SCRIPT_NAME --configure-docker --working-folder /opt/ctfd
-    $SCRIPT_NAME --generate-certs --configure-docker --ctfd-url example.com
+    $SCRIPT_NAME --working-folder /opt/ctfd
+    $SCRIPT_NAME --ctfd-url example.com
 EOF
 }
 
@@ -86,14 +82,6 @@ parse_arguments() {
                 [[ -n ${2:-} ]] || error_exit "Missing value for --working-folder"
                 CONFIG[WORKING_DIR]="$2"
                 shift 2
-                ;;
-            --configure-docker)
-                CONFIG[CONFIGURE_DOCKER]="true"
-                shift
-                ;;
-            --generate-certs)
-                CONFIG[GENERATE_CERTS]="true"
-                shift
                 ;;
             --ctfd-url)
                 [[ -n ${2:-} ]] || error_exit "Missing value for --ctfd-url"
@@ -133,6 +121,7 @@ update_system() {
         zip \
         git \
         python3-pip \
+        python3.12-venv \
         wget
     
     log_success "System packages updated"
@@ -292,19 +281,8 @@ configure_docker_tls() {
     done
     
     if [[ ${#missing_certs[@]} -gt 0 ]]; then
-        if [[ ${CONFIG[GENERATE_CERTS]} == "true" ]]; then
-            log_info "Generating missing certificates..."
-            create_certificates
-        else
-            log_error "Missing certificates: ${missing_certs[*]}"
-            read -p "Generate certificates now? (y/N): " -r
-            if [[ $REPLY =~ ^[Yy]$ ]]; then
-                CONFIG[GENERATE_CERTS]="true"
-                create_certificates
-            else
-                error_exit "Cannot configure Docker without certificates"
-            fi
-        fi
+        log_info "Generating missing certificates..."
+        create_certificates
     fi
     
     mkdir -p "$docker_conf_dir"
@@ -370,15 +348,10 @@ install_ctfd() {
     sed -i "s/db_root_password/$db_root_password/g" "$compose_file"
     log_info "Configuration updated with new secrets"
 
-    local ctfd_url="${CONFIG[CTFD_URL]}"
-    if [[ $ctfd_url == "localhost" ]]; then
-        error_exit "CTFd URL must be specified with --ctfd-url"
-    fi
-    
-    sed -i "s/BASE_DOMAIN=.*/BASE_DOMAIN=$ctfd_url/" "$compose_file"
+    sed -i "s|BASE_DOMAIN=.*|BASE_DOMAIN='${CONFIG[CTFD_URL]}'|" "$compose_file"
     
     log_info "To start the CTFd containers, please run the following command in a properly configured session:"
-    echo "\tdocker compose -f "$compose_file" up -d"
+    echo -e "\tdocker compose -f "$compose_file" up -d"
     
     log_success "CTFd installation complete!"
     log_info "Download certificates with: scp -r ${SUDO_USER:-$USER}@<server_ip>:${CONFIG[WORKING_DIR]}/cert/cert.zip <local_path>"
@@ -397,13 +370,9 @@ main() {
     install_pipx
     install_docker
     
-    if [[ ${CONFIG[GENERATE_CERTS]} == "true" ]]; then
-        create_certificates
-    fi
+    create_certificates
     
-    if [[ ${CONFIG[CONFIGURE_DOCKER]} == "true" ]]; then
-        configure_docker_tls
-    fi
+    configure_docker_tls
     
     install_ctfd
     
