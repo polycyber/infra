@@ -129,7 +129,7 @@ ingest_challenges() {
 get_challenges_path() {
   local repo_path="${CONFIG[WORKING_DIR]}/${CONFIG[CTF_REPO]}"
   local complete_path="$repo_path"
-  if [-d "$repo_path/challenges" ]; then
+  if [ -d "$repo_path/challenges" ]; then
     complete_path="$repo_path/challenges"
   fi
   CONFIG[CHALLENGE_PATH]="$complete_path"
