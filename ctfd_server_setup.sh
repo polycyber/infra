@@ -1,7 +1,5 @@
 #!/bin/bash
 
-# nano ctfd_server_setup.sh && chmod +x ctfd_server_setup.sh && ./ctfd_server_setup.sh --ctfd-url http://192.168.56.101
-
 set -euo pipefail  # Exit on error, undefined variables, and pipe failures
 
 readonly SCRIPT_NAME="$(basename "$0")"
@@ -350,6 +348,10 @@ install_ctfd() {
 
     sed -i "s|BASE_DOMAIN=.*|BASE_DOMAIN='${CONFIG[CTFD_URL]}'|" "$compose_file"
     
+    log_info "Pulling necessary docker images..."
+    docker compose -f "$compose_file" pull -q
+    log_success "Docker images successfully pulled"
+
     log_info "To start the CTFd containers, please run the following command in a properly configured session:"
     echo -e "\tdocker compose -f "$compose_file" up -d"
     
