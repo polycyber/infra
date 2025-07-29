@@ -18,7 +18,7 @@ services:
     volumes:
       - ./data/CTFd/logs:/var/log/CTFd
       - ./data/CTFd/uploads:/var/uploads
-      - ./data/CTFd/themes:/opt/CTFd/CTFd/themes
+#      - ./data/CTFd/themes:/opt/CTFd/CTFd/themes       # Only enable if a custom theme is desired, and don't forget to add the custom theme to the folder before starting the container
       - ../CTFd-Docker-Challenges/docker_challenges:/opt/CTFd/CTFd/plugins/docker_challenges:ro
     depends_on:
       - redis
