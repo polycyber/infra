@@ -364,6 +364,24 @@ install_ctfd() {
     log_info "  DB Root Password: $db_root_password"
 }
 
+create_and_set_owner() {
+    local working_dir="${CONFIG[WORKING_DIR]}"
+    local upload_folder="$working_dir/data/CTFd/uploads"
+    local log_folder="$working_dir/data/CTFd/logs"
+
+    log_info "Creating necessary directories and setting ownership..."
+
+    # Create directories
+    mkdir -p "$upload_folder"
+    mkdir -p "$log_folder"
+
+    # Change ownership to 1001
+    chown -R 1001:1001 "$upload_folder"
+    chown -R 1001:1001 "$log_folder"
+
+    log_success "Directories created and ownership set successfully"
+}
+
 main() {
     log_info "Starting CTFd server setup..."
     
@@ -375,6 +393,8 @@ main() {
     create_certificates
     
     configure_docker_tls
+
+    create_and_set_owner
     
     install_ctfd
     

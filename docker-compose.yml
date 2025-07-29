@@ -16,9 +16,9 @@ services:
       - REVERSE_PROXY=true
       - SECRET_KEY=SecretKeyHere
     volumes:
-      - ./data/CTFd/logs:/var/log/CTFd
-      - ./data/CTFd/uploads:/var/uploads
-#      - ./data/CTFd/themes:/opt/CTFd/CTFd/themes       # Only enable if a custom theme is desired, and don't forget to add the custom theme to the folder before starting the container
+      - ../data/CTFd/logs:/var/log/CTFd
+      - ../data/CTFd/uploads:/var/uploads
+#      - ../data/CTFd/themes:/opt/CTFd/CTFd/themes       # Only enable if a custom theme is desired, and don't forget to add the custom theme to the folder before starting the container
       - ../CTFd-Docker-Challenges/docker_challenges:/opt/CTFd/CTFd/plugins/docker_challenges:ro
     depends_on:
       - redis
@@ -39,8 +39,8 @@ services:
       - BASE_DOMAIN=localhost
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./data/caddy/data:/data
-      - ./data/caddy/config:/config
+      - ../data/caddy/data:/data
+      - ../data/caddy/config:/config
     depends_on:
       - ctfd
     networks:
@@ -59,7 +59,7 @@ services:
       - MARIADB_DATABASE=ctfd
       - MARIADB_AUTO_UPGRADE=1
     volumes:
-      - ./data/mysql:/var/lib/mysql
+      - ../data/mysql:/var/lib/mysql
     networks:
       - internal
     # This command is required to set important mariadb defaults
@@ -71,7 +71,7 @@ services:
     image: redis:7.4.2-alpine
     restart: unless-stopped
     volumes:
-    - ./data/redis:/data
+    - ../data/redis:/data
     networks:
         internal:
 

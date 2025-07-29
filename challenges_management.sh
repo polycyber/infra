@@ -41,7 +41,6 @@ declare -A CONFIG=(
     [PARALLEL_BUILDS]="4"
     [DEBUG]="false"
     [SKIP_DOCKER_CHECK]="false"
-    [AUTO_CONFIRM]="false"
     [BACKUP_BEFORE_SYNC]="false"
     [CONFIG_FILE]=""
 )
@@ -68,7 +67,6 @@ BEHAVIOR OPTIONS:
     --dry-run               Show what would be done without executing
     --force                 Force operations (rebuild images, overwrite challenges)
     --parallel-builds N     Number of parallel Docker builds (default: 4)
-    --auto-confirm          Skip interactive confirmations
     --backup-before-sync    Create backup before syncing challenges
     
 DEBUGGING:
@@ -192,10 +190,6 @@ parse_arguments() {
                 ;;
             --skip-docker-check)
                 CONFIG[SKIP_DOCKER_CHECK]="true"
-                shift
-                ;;
-            --auto-confirm)
-                CONFIG[AUTO_CONFIRM]="true"
                 shift
                 ;;
             --backup-before-sync)
@@ -606,6 +600,23 @@ build_challenges() {
     return $([[ $failed_builds -eq 0 ]] && echo 0 || echo 1)
 }
 
+initialize_ctfcli() {
+    if [[ ! -f "${CONFIG[WORKING_DIR]}/.ctf/config" ]]; then
+        log_info "CTFcli is not initialized. Initializing CTFcli..."
+        if [[ "${CONFIG[DRY_RUN]}" == "false" ]]; then
+            if ctf init; then
+                log_success "CTFcli initialized successfully"
+            else
+                error_exit "Failed to initialize CTFcli"
+            fi
+        else
+            echo "Would initialize: ctf init"
+        fi
+    else
+        log_info "CTFcli is already initialized"
+    fi
+}
+
 ingest_challenges() {
     local successful_installs=0
     local failed_installs=0
@@ -655,7 +666,7 @@ ingest_challenges() {
     }
     
     # Confirmation prompt
-    if [[ "${CONFIG[AUTO_CONFIRM]}" == "false" && "${CONFIG[DRY_RUN]}" == "false" ]]; then
+    if [[ "${CONFIG[DRY_RUN]}" == "false" ]]; then
         echo
         log_info "Ready to ingest $total_challenges challenges."
         log_warning "Make sure all Docker images have been added to the CTFd Docker Plugin first."
@@ -958,12 +969,10 @@ cleanup_docker() {
     
     log_info "Found ${#challenge_images[@]} challenge images"
     
-    if [[ "${CONFIG[AUTO_CONFIRM]}" == "false" ]]; then
-        echo "Images to remove:"
-        printf '%s\n' "${challenge_images[@]}" | sed 's/^/  - /'
-        read -p "Remove these images? (y/N): " -r
-        [[ $REPLY =~ ^[Yy]$ ]] || { log_info "Cleanup cancelled"; return 0; }
-    fi
+    echo "Images to remove:"
+    printf '%s\n' "${challenge_images[@]}" | sed 's/^/  - /'
+    read -p "Remove these images? (y/N): " -r
+    [[ $REPLY =~ ^[Yy]$ ]] || { log_info "Cleanup cancelled"; return 0; }
     
     local removed=0
     for image in "${challenge_images[@]}"; do
@@ -986,19 +995,20 @@ cleanup_docker() {
 main() {
     log_info "Enhanced CTF Challenge Management Tool v${VERSION}"
     log_info "Action: ${CONFIG[ACTION]}"
-    
+
     check_dependencies
     install_ctfcli
     get_challenges_path
-    
+
     case "${CONFIG[ACTION]}" in
         "all")
-            build_challenges && ingest_challenges
+            build_challenges && initialize_ctfcli && ingest_challenges
             ;;
         "build")
             build_challenges
             ;;
         "ingest")
+            initialize_ctfcli
             ingest_challenges
             ;;
         "sync")
@@ -1014,7 +1024,7 @@ main() {
             error_exit "Unknown action: ${CONFIG[ACTION]}"
             ;;
     esac
-    
+
     log_success "Operation completed successfully!"
 }
 
