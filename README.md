@@ -6,7 +6,7 @@ L'objectif de ce dépot est de rassembler l'ensemble des ressources utilisées p
 
 ### 1. Script d'Installation CTFd (`setup.sh`)
 
-Script Bash qui automatise l'installation et la configuration d'un serveur CTFd avec Docker sécurisé via TLS et le plugin CTFd-Docker-Challenges.
+Script Bash qui automatise l'installation et la configuration d'un serveur CTFd avec Docker sécurisé via TLS et utilisant le plugin CTFd-Docker-Challenges.
 
 ### 2. Outil de Gestion des Challenges (`challenges_management.sh`)
 
@@ -228,8 +228,8 @@ repo-challenges/
 │   │   ├── challenge-1/
 │   │   │   ├── challenge.yml      # Configuration du challenge
 │   │   │   ├── Dockerfile         # Image Docker (pour type: docker)
-│   │   │   ├── src/              # Code source
-│   │   │   └── files/            # Fichiers du challenge
+│   │   │   ├── src/               # Code source
+│   │   │   └── files/             # Fichiers du challenge
 │   │   └── challenge-2/
 │   ├── crypto/
 │   └── pwn/
@@ -253,7 +253,7 @@ description: |-
 
   ## Description (english)
 
-  Small english description
+  Small English description
 
 flags:
   - polycyber{flag_a_tr0uv3r}
