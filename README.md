@@ -56,6 +56,7 @@ Script Bash avancé pour la construction, l'ingestion et la synchronisation des 
 |--------|-------------|-------------|
 | `--ctfd-url URL` | URL/domaine de votre serveur CTFd | ✅ Oui |
 | `--working-folder DIR` | Répertoire de travail (défaut: `/home/$USER`) | ❌ Non |
+| `--theme` | Active l'utilisation d'un thème personnalisé | ❌ Non |
 | `--help` | Affiche l'aide | ❌ Non |
 
 #### Exemples d'installation
@@ -67,9 +68,19 @@ Script Bash avancé pour la construction, l'ingestion et la synchronisation des 
 # Installation avec répertoire personnalisé
 ./setup.sh --ctfd-url exemple.com --working-folder /opt/ctfd
 
+# Installation avec thème personnalisé activé
+./setup.sh --ctfd-url exemple.com --theme
+
 # Afficher l'aide
 ./setup.sh --help
 ```
+
+#### Configuration du thème personnalisé
+
+Si vous utilisez l'option `--theme`, le script activera automatiquement le montage du dossier de thèmes dans le `docker-compose.yml`. 
+
+> [!WARNING]  
+> Vous devez placer votre thème personnalisé dans le dossier `theme/` du répertoire de travail avant de démarrer les conteneurs Docker.
 
 ### Outil de gestion des challenges
 
@@ -188,6 +199,12 @@ Le script génère automatiquement :
 
 #### 5. Configuration Docker TLS
 - Configuration du Docker daemon pour utiliser TLS
+
+#### 6. Configuration des thèmes (optionnel)
+Si l'option `--theme` est utilisée :
+- Active le montage du dossier `theme/` dans le conteneur CTFd
+- Permet l'utilisation de thèmes personnalisés
+- Les thèmes doivent être placés manuellement dans le dossier avant le démarrage des conteneurs
   
 ### Outil de gestion des challenges
 

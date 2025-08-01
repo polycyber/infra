@@ -56,6 +56,7 @@ Bash script for building, ingesting, and synchronizing CTF challenges with suppo
 |--------|-------------|-------------|
 | `--ctfd-url URL` | URL/domain of your CTFd server | ✅ Yes |
 | `--working-folder DIR` | Working directory (default: `/home/$USER`) | ❌ No |
+| `--theme` | Enables the use of a personalised theme | ❌ Non |
 | `--help` | Display help | ❌ No |
 
 #### Installation Examples
@@ -67,9 +68,19 @@ Bash script for building, ingesting, and synchronizing CTF challenges with suppo
 # Installation with custom directory
 ./setup.sh --ctfd-url example.com --working-folder /opt/ctfd
 
+# Installation with custom theme
+./setup.sh --ctfd-url exemple.com --theme
+
 # Display help
 ./setup.sh --help
 ```
+
+#### Custom theme configuration
+
+If you use the `--theme` option, the script will automatically mount the theme folder in the `docker-compose.yml`. 
+
+> [!WARNING]  
+> You must copy the custom theme in the `theme/` folder before starting the containers.
 
 ### Challenge Management Tool
 
@@ -188,6 +199,12 @@ The script automatically generates:
 
 #### 5. Docker TLS Configuration
 - Configure Docker daemon to use TLS
+
+#### 6. Theme configuration (optionnal)
+If the `--theme` flag is used:
+- Mounts the `theme/` folder in the CTFd container
+- Enables the use of custom themes
+- The themes must be placed manually in the folder before starting the containers
 
 ### Challenge Management Tool
 

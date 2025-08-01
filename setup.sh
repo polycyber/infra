@@ -33,6 +33,7 @@ declare -A CONFIG=(
     [GENERATE_CERTS]="true"
     [CONFIGURE_DOCKER]="true"
     [WORKING_DIR]="/home/${SUDO_USER:-$USER}"
+    [THEME]="false"
 )
 
 declare -A CERT_CONFIG=(
@@ -63,28 +64,34 @@ show_usage() {
 Usage: $SCRIPT_NAME [OPTIONS]
 
 Options:
-    --working-folder DIR    Set working directory (default: /home/\$USER)
     --ctfd-url URL          Set CTFd URL (mandatory)
+    --working-folder DIR    Set working directory (default: /home/\$USER)
+    --theme                 Enable custom theme (default: false)
     --help                  Show this help message
 
 Examples:
-    $SCRIPT_NAME --working-folder /opt/ctfd
-    $SCRIPT_NAME --ctfd-url example.com
+    $SCRIPT_NAME --ctfd-url example.com 
+    $SCRIPT_NAME --ctfd-url example.com --working-folder /opt/ctfd
+    $SCRIPT_NAME --ctfd-url example.com --theme
 EOF
 }
 
 parse_arguments() {
     while [[ $# -gt 0 ]]; do
         case $1 in
+            --ctfd-url)
+                [[ -n ${2:-} ]] || error_exit "Missing value for --ctfd-url"
+                CONFIG[CTFD_URL]="$2"
+                shift 2
+                ;;
             --working-folder)
                 [[ -n ${2:-} ]] || error_exit "Missing value for --working-folder"
                 CONFIG[WORKING_DIR]="$2"
                 shift 2
                 ;;
-            --ctfd-url)
-                [[ -n ${2:-} ]] || error_exit "Missing value for --ctfd-url"
-                CONFIG[CTFD_URL]="$2"
-                shift 2
+            --theme)
+                CONFIG[THEME]="true"
+                shift
                 ;;
             --help)
                 show_usage
@@ -351,6 +358,11 @@ install_ctfd() {
     log_info "Pulling necessary docker images..."
     docker compose -f "$compose_file" pull -q
     log_success "Docker images successfully pulled"
+
+    if [[ "${CONFIG[THEME]}" == "true" ]]; then
+        log_warning "Custom theme enabled. Make sure to place your theme in the theme folder before starting the docker compose."
+        sed -i '/#.*themes:/s/^#//' "$compose_file"
+    fi
 
     log_info "To start the CTFd containers, please run the following command in a properly configured session:"
     echo -e "\tdocker compose -f "$compose_file" up -d"
