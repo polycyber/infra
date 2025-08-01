@@ -56,7 +56,7 @@ Bash script for building, ingesting, and synchronizing CTF challenges with suppo
 |--------|-------------|-------------|
 | `--ctfd-url URL` | URL/domain of your CTFd server | ✅ Yes |
 | `--working-folder DIR` | Working directory (default: `/home/$USER`) | ❌ No |
-| `--theme` | Enables the use of a personalised theme | ❌ Non |
+| `--theme` | Enables the use of a personalised theme | ❌ No |
 | `--help` | Display help | ❌ No |
 
 #### Installation Examples
