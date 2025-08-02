@@ -824,12 +824,14 @@ sync_challenges() {
     # Temporarily disable exit on error for this function
     set +e
     
+    local current=0
     # Sync each challenge individually
     for challenge_path in "${challenges_to_sync[@]}"; do
         local challenge_name
         challenge_name=$(basename "$challenge_path")
         
-        log_info "Syncing challenge: $challenge_name"
+        current=$((current + 1))
+        log_info "[$current/$total_challenges] Syncing challenge: $challenge_name"
         
         if [[ "${CONFIG[DRY_RUN]}" == "false" ]]; then
             local sync_output
