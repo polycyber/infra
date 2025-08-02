@@ -831,7 +831,7 @@ sync_challenges() {
         challenge_name=$(basename "$challenge_path")
         
         current=$((current + 1))
-        log_info "[$current/$total_challenges] Syncing challenge: $challenge_name"
+        log_info "[$current/$challenges_to_sync] Syncing challenge: $challenge_name"
         
         if [[ "${CONFIG[DRY_RUN]}" == "false" ]]; then
             local sync_output
