@@ -111,6 +111,36 @@ generate_password() {
     openssl rand -base64 "$((length * 3 / 4))" | tr -d '+/=' | head -c "$length"
 }
 
+install_python_venv() {
+    local python_version
+    python_version=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null)
+    local venv_package="python${python_version}-venv"
+    
+    log_info "Detected Python version: $python_version"
+    log_info "Installing $venv_package..."
+    
+    # Try to install the version-specific venv package
+    if apt-get install -qq -y "$venv_package" 2>/dev/null; then
+        log_success "Successfully installed $venv_package"
+        return 0
+    fi
+    
+    # If that fails, try some common alternatives
+    log_warning "Failed to install $venv_package, trying alternatives..."
+    
+    local alternatives=("python3-venv" "python3.13-venv" "python3.12-venv" "python3.11-venv")
+    
+    for alt in "${alternatives[@]}"; do
+        log_info "Trying $alt..."
+        if apt-get install -qq -y "$alt" 2>/dev/null; then
+            log_success "Successfully installed $alt"
+            return 0
+        fi
+    done
+    
+    error_exit "Failed to install any Python venv package. Please install manually."
+}
+
 update_system() {
     log_info "Updating system packages..."
     export DEBIAN_FRONTEND=noninteractive
@@ -126,8 +156,9 @@ update_system() {
         zip \
         git \
         python3-pip \
-        python3.12-venv \
         wget
+    
+    install_python_venv
     
     log_success "System packages updated"
 }
