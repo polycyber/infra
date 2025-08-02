@@ -26,7 +26,7 @@ Script Bash avancé pour la construction, l'ingestion et la synchronisation des 
 - **Dépôt de challenges** : Structure de dossiers avec fichiers `challenge.yml`
 
 > [!CAUTION]
-> **📍 Exigence de placement du script** : Le script de gestion des challenges a des exigences de placement spécifiques qui sont **essentielles** pour un fonctionnement correct. Consultez le [guide de placement détaillé](#exemples-de-placement-correct) avant d'exécuter le script.
+> **📍 Exigence de placement du script** : Le script de gestion des challenges a des exigences de placement spécifiques qui sont **essentielles** pour un fonctionnement correct. Consultez le [guide de placement détaillé](#outil-de-gestion-des-challenges) avant d'exécuter le script.
 
 ## Installation
 

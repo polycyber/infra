@@ -26,7 +26,7 @@ Bash script for building, ingesting, and synchronizing CTF challenges with suppo
 - **Challenge repository**: Folder structure with `challenge.yml` files
 
 > [!CAUTION]
-> **📍 Script Placement Requirement**: The challenge management script has specific placement requirements that are **essential** for proper operation. See the [detailed placement guide](#correct-placement-examples) before running the script.
+> **📍 Script Placement Requirement**: The challenge management script has specific placement requirements that are **essential** for proper operation. See the [detailed placement guide](#challenge-management-tool) before running the script.
 
 ## Installation
 
