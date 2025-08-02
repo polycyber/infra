@@ -353,7 +353,7 @@ install_ctfd() {
     sed -i "s/db_root_password/$db_root_password/g" "$compose_file"
     log_info "Configuration updated with new secrets"
 
-    sed -i "s|BASE_DOMAIN=.*|BASE_DOMAIN='${CONFIG[CTFD_URL]}'|" "$compose_file"
+    sed -i "s|BASE_DOMAIN=.*|BASE_DOMAIN=${CONFIG[CTFD_URL]}|" "$compose_file"
     
     log_info "Pulling necessary docker images..."
     docker compose -f "$compose_file" pull -q
