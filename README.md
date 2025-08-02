@@ -16,7 +16,7 @@ Script Bash avancé pour la construction, l'ingestion et la synchronisation des 
 
 ### Pour le script d'installation CTFd
 
-- **Système d'exploitation** : Ubuntu/Debian
+- **Système d'exploitation** : Testé et vérifié sous Ubuntu Server 24 et Ubuntu Server 25
 - **Privilèges** : Le script doit être exécuté en tant que root (utilise sudo automatiquement si nécessaire)
 
 ### Pour l'outil de gestion des challenges

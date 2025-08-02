@@ -16,7 +16,7 @@ Bash script for building, ingesting, and synchronizing CTF challenges with suppo
 
 ### For the CTFd installation script
 
-- **Operating System**: Ubuntu/Debian
+- **Operating System**: Tested and verified on Ubuntu Server 24 and Ubuntu Server 25
 - **Privileges**: The script must be executed as root (automatically uses sudo if necessary)
 
 ### For the challenge management tool
