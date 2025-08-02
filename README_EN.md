@@ -25,6 +25,9 @@ Bash script for building, ingesting, and synchronizing CTF challenges with suppo
 - **CTFcli**: Installed via pipx (automatic installation if absent)
 - **Challenge repository**: Folder structure with `challenge.yml` files
 
+> [!CAUTION]
+> **📍 Script Placement Requirement**: The challenge management script has specific placement requirements that are **essential** for proper operation. See the [detailed placement guide](#correct-placement-examples) before running the script.
+
 ## Installation
 
 ### CTFd Server Installation
@@ -34,6 +37,7 @@ Bash script for building, ingesting, and synchronizing CTF challenges with suppo
    git clone https://github.com/polycyber/infra
    cd infra
    chmod +x setup.sh challenges_management.sh
+   mv challenges_management.sh ..
    ```
 
 2. **Run the installation script**:
@@ -83,6 +87,36 @@ If you use the `--theme` option, the script will automatically mount the theme f
 > You must copy the custom theme in the `theme/` folder before starting the containers.
 
 ### Challenge Management Tool
+
+> [!WARNING]
+> **Script Location Requirements for Challenge Management**
+> 
+> The challenge management script relies on the `ctfcli` utility, which requires challenge directories to be located **below** its execution point in the file system hierarchy. This means the script must be placed at the same level as the challenges directory or in a parent directory.
+
+#### **Correct Placement Examples**
+
+| Component | Path | Status |
+|-----------|------|--------|
+| Challenges | `/home/user/challenges` | ✅ Works |
+| Script | `/home/user/challenges_management.sh` | ✅ Works |
+
+**Why this works:** The script is at the same level as the challenges directory, so `ctfcli` can access the challenges folder.
+
+| Component | Path | Status |
+|-----------|------|--------|
+| Challenges | `/home/user/challenges` | ✅ Works |
+| Script | `/home/challenges_management.sh` | ✅ Works |
+
+**Why this works:** The script is in a parent directory, so `ctfcli` can still reach the challenges folder below it.
+
+#### **Incorrect Placement Example**
+
+| Component | Path | Status |
+|-----------|------|--------|
+| Challenges | `/home/user/challenges` | ❌ Fails |
+| Script | `/home/user/infra/challenges_management.sh` | ❌ Fails |
+
+**Why this fails:** The script is in a subdirectory (`infra`) that is at the same level as `challenges`. From this location, `ctfcli` cannot access the challenges directory because it's not in the script's hierarchical path.
 
 #### Available Actions
 

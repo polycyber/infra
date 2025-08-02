@@ -25,6 +25,9 @@ Script Bash avancé pour la construction, l'ingestion et la synchronisation des 
 - **CTFcli** : Installé via pipx (installation automatique si absent)
 - **Dépôt de challenges** : Structure de dossiers avec fichiers `challenge.yml`
 
+> [!CAUTION]
+> **📍 Exigence de placement du script** : Le script de gestion des challenges a des exigences de placement spécifiques qui sont **essentielles** pour un fonctionnement correct. Consultez le [guide de placement détaillé](#exemples-de-placement-correct) avant d'exécuter le script.
+
 ## Installation
 
 ### Installation du serveur CTFd
@@ -34,6 +37,7 @@ Script Bash avancé pour la construction, l'ingestion et la synchronisation des 
    git clone https://github.com/polycyber/infra
    cd infra
    chmod +x setup.sh challenges_management.sh
+   mv challenges_management.sh ..
    ```
 
 2. **Exécutez le script d'installation** :
@@ -83,6 +87,36 @@ Si vous utilisez l'option `--theme`, le script activera automatiquement le monta
 > Vous devez placer votre thème personnalisé dans le dossier `theme/` du répertoire de travail avant de démarrer les conteneurs Docker.
 
 ### Outil de gestion des challenges
+
+> [!WARNING]
+> **Exigences de placement du script pour la gestion des challenges**
+> 
+> Le script de gestion de challenges utilise l'utilitaire `ctfcli`, qui nécessite que les répertoires de challenges soient situés **en dessous** de son point d'exécution dans la hiérarchie du système de fichiers. Cela signifie que le script doit être placé au même niveau que le répertoire des challenges ou dans un répertoire parent.
+
+#### **Exemples de placement correct**
+
+| Composant | Chemin | Statut |
+|-----------|--------|--------|
+| Challenges | `/home/user/challenges` | ✅ Fonctionne |
+| Script | `/home/user/challenges_management.sh` | ✅ Fonctionne |
+
+**Pourquoi cela fonctionne :** Le script est au même niveau que le répertoire des challenges, donc `ctfcli` peut accéder au dossier challenges.
+
+| Composant | Chemin | Statut |
+|-----------|--------|--------|
+| Challenges | `/home/user/challenges` | ✅ Fonctionne |
+| Script | `/home/challenges_management.sh` | ✅ Fonctionne |
+
+**Pourquoi cela fonctionne :** Le script est dans un répertoire parent, donc `ctfcli` peut toujours atteindre le dossier challenges en dessous.
+
+#### **Exemple de placement incorrect**
+
+| Composant | Chemin | Statut |
+|-----------|--------|--------|
+| Challenges | `/home/user/challenges` | ❌ Échoue |
+| Script | `/home/user/infra/challenges_management.sh` | ❌ Échoue |
+
+**Pourquoi cela échoue :** Le script est dans un sous-répertoire (`infra`) qui est au même niveau que `challenges`. Depuis cet emplacement, `ctfcli` ne peut pas accéder au répertoire des challenges car il n'est pas dans le chemin hiérarchique du script.
 
 #### Actions disponibles
 
