@@ -16,7 +16,10 @@ Script Bash avancé pour la construction, l'ingestion et la synchronisation des 
 
 ### Pour le script d'installation CTFd
 
-- **Système d'exploitation** : Testé et vérifié sous Ubuntu Server 24 et Ubuntu Server 25
+- **Systèmes d'exploitation** : Testé et vérifié sous : 
+  - Ubuntu Server 24
+  - Ubuntu Server 25
+  - Debian 12
 - **Privilèges** : Le script doit être exécuté en tant que root (utilise sudo automatiquement si nécessaire)
 
 ### Pour l'outil de gestion des challenges
@@ -28,9 +31,7 @@ Script Bash avancé pour la construction, l'ingestion et la synchronisation des 
 > [!CAUTION]
 > **📍 Exigence de placement du script** : Le script de gestion des challenges a des exigences de placement spécifiques qui sont **essentielles** pour un fonctionnement correct. Consultez le [guide de placement détaillé](#outil-de-gestion-des-challenges) avant d'exécuter le script.
 
-## Installation
-
-### Installation du serveur CTFd
+## Installation du serveur CTFd
 
 1. **Clonez ce dépôt** :
    ```bash
@@ -40,17 +41,21 @@ Script Bash avancé pour la construction, l'ingestion et la synchronisation des 
    mv challenges_management.sh ..
    ```
 
-2. **Exécutez le script d'installation** :
+2. **Exécutez le script d'installation et suivez les instructions** :
    ```bash
    ./setup.sh --ctfd-url <votre-domaine.com>
    ```
 
-### Configuration de l'outil de gestion
-
-1. **Clonez votre dépôt de challenges** :
-   ```bash
-   git clone <url-repo-challenges>
-   ```
+3. **Rendez-vous sur l'URL du serveur configurée**
+   - Effectuez la configuration de l'événement CTF
+   - Dirigez-vous vers le panneau de configuration administrateur `Admin Panel` --> `Plugins` --> `Docker Config`
+   - Entrez les informations suivantes pour initialiser la connexion du plugin à la socket Docker :
+     - Hostname: `172.17.0.1:2376`
+     - TLS Enabled: `Yes`
+     - Récupérez les CA Cert / Client Cert / Client Key depuis le serveur une fois la configuration finie : 
+    ```bash
+    scp -r <user>@<server_ip>:<working_dir>/cert/cert.zip <local_path>
+    ``` 
 
 ## Utilisation
 
@@ -84,7 +89,7 @@ Script Bash avancé pour la construction, l'ingestion et la synchronisation des 
 Si vous utilisez l'option `--theme`, le script activera automatiquement le montage du dossier de thèmes dans le `docker-compose.yml`. 
 
 > [!WARNING]  
-> Vous devez placer votre thème personnalisé dans le dossier `theme/` du répertoire de travail avant de démarrer les conteneurs Docker.
+> Vous devez placer votre thème personnalisé dans le dossier `theme/` du répertoire de travail avant de démarrer les conteneurs Docker. Ce dossier sera créé automatiquement durant l'installation.
 
 ### Outil de gestion des challenges
 

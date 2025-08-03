@@ -16,7 +16,10 @@ Bash script for building, ingesting, and synchronizing CTF challenges with suppo
 
 ### For the CTFd installation script
 
-- **Operating System**: Tested and verified on Ubuntu Server 24 and Ubuntu Server 25
+- **Operating System**: Tested and verified on:
+  - Ubuntu Server 24
+  - Ubuntu Server 25
+  - Debian 12
 - **Privileges**: The script must be executed as root (automatically uses sudo if necessary)
 
 ### For the challenge management tool
@@ -28,9 +31,7 @@ Bash script for building, ingesting, and synchronizing CTF challenges with suppo
 > [!CAUTION]
 > **📍 Script Placement Requirement**: The challenge management script has specific placement requirements that are **essential** for proper operation. See the [detailed placement guide](#challenge-management-tool) before running the script.
 
-## Installation
-
-### CTFd Server Installation
+## CTFd Server Installation
 
 1. **Clone this repository**:
    ```bash
@@ -40,17 +41,20 @@ Bash script for building, ingesting, and synchronizing CTF challenges with suppo
    mv challenges_management.sh ..
    ```
 
-2. **Run the installation script**:
+2. **Run the installation script and follow the instructions**:
    ```bash
    ./setup.sh --ctfd-url <your-domain.com>
    ```
-
-### Configuration of the Management Tool
-
-1. **Clone your challenge repository**:
-   ```bash
-   git clone <url-repo-challenges>
-   ```
+3. **Go to the configured server URL**
+   - Configure the CTF event
+   - Navigate to the admin configuration panel: `Admin Panel` --> `Plugins` --> `Docker Config`
+   - Enter the following information to initialize the plugin's connection to the Docker socket:
+     - Hostname: `172.17.0.1:2376`
+     - TLS Enabled: `Yes`
+     - Retrieve the CA Cert / Client Cert / Client Key from the server once the setup is complete:
+    ```bash
+    scp -r <user>@<server_ip>:<working_dir>/cert/cert.zip <local_path>
+    ```
 
 ## Usage
 
@@ -84,7 +88,7 @@ Bash script for building, ingesting, and synchronizing CTF challenges with suppo
 If you use the `--theme` option, the script will automatically mount the theme folder in the `docker-compose.yml`. 
 
 > [!WARNING]  
-> You must copy the custom theme in the `theme/` folder before starting the containers.
+> You must copy the custom theme in the `theme/` folder before starting the containers. This folder will be automatically created during setup.
 
 ### Challenge Management Tool
 
