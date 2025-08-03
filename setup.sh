@@ -29,6 +29,25 @@ ensure_root() {
     log_info "Running script as root..."
 }
 
+identify_os() {
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        case $ID in
+            ubuntu)
+                echo "ubuntu"
+                ;;
+            debian)
+                echo "debian"
+                ;;
+            *)
+                error_exit "Unsupported OS: $ID. Please check the official Docker documentation before running the setup again."
+                ;;
+        esac
+    else
+        error_exit "Unable to identify the OS. Please check the official Docker documentation before running the setup again."
+    fi
+}
+
 declare -A CONFIG=(
     [GENERATE_CERTS]="true"
     [CONFIGURE_DOCKER]="true"
@@ -70,7 +89,7 @@ Options:
     --help                  Show this help message
 
 Examples:
-    $SCRIPT_NAME --ctfd-url example.com 
+    $SCRIPT_NAME --ctfd-url example.com
     $SCRIPT_NAME --ctfd-url example.com --working-folder /opt/ctfd
     $SCRIPT_NAME --ctfd-url example.com --theme
 EOF
@@ -115,21 +134,21 @@ install_python_venv() {
     local python_version
     python_version=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null)
     local venv_package="python${python_version}-venv"
-    
+
     log_info "Detected Python version: $python_version"
     log_info "Installing $venv_package..."
-    
+
     # Try to install the version-specific venv package
     if apt-get install -qq -y "$venv_package" 2>/dev/null; then
         log_success "Successfully installed $venv_package"
         return 0
     fi
-    
+
     # If that fails, try some common alternatives
     log_warning "Failed to install $venv_package, trying alternatives..."
-    
+
     local alternatives=("python3-venv" "python3.13-venv" "python3.12-venv" "python3.11-venv")
-    
+
     for alt in "${alternatives[@]}"; do
         log_info "Trying $alt..."
         if apt-get install -qq -y "$alt" 2>/dev/null; then
@@ -137,14 +156,14 @@ install_python_venv() {
             return 0
         fi
     done
-    
+
     error_exit "Failed to install any Python venv package. Please install manually."
 }
 
 update_system() {
     log_info "Updating system packages..."
     export DEBIAN_FRONTEND=noninteractive
-    
+
     apt-get update -qq
     apt-get upgrade -y -qq
     DEBIAN_FRONTEND=noninteractive apt-get install -qq -y \
@@ -157,9 +176,9 @@ update_system() {
         git \
         python3-pip \
         wget
-    
+
     install_python_venv
-    
+
     log_success "System packages updated"
 }
 
@@ -170,12 +189,15 @@ install_docker() {
     fi
 
     log_info "Installing Docker..."
-    
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
+
+    local DISTRO
+    DISTRO=$(identify_os)
+
+    curl -fsSL "https://download.docker.com/linux/${DISTRO}/gpg" | \
         gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
 
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] \
-          https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | \
+          https://download.docker.com/linux/${DISTRO} $(lsb_release -cs) stable" | \
         tee /etc/apt/sources.list.d/docker.list > /dev/null
 
     apt-get update -qq
@@ -196,7 +218,7 @@ install_docker() {
 
 setup_docker_group() {
     log_info "Setting up Docker group..."
-    
+
     if ! getent group docker >/dev/null; then
         groupadd docker
     fi
@@ -225,17 +247,17 @@ install_pipx() {
 create_certificates() {
     local cert_dir="${CONFIG[WORKING_DIR]}/cert"
     local ca_password
-    
+
     ca_password=$(generate_password 32)
 
     log_info "Creating certificates in $cert_dir..."
-    
+
     mkdir -p "$cert_dir"
     cd "$cert_dir" || error_exit "Cannot access certificate directory"
-    
+
     log_info "Generating CA private key..."
     openssl genrsa -aes256 -passout "pass:$ca_password" -out "${CERT_FILES[CA_KEY]}" 4096
-    
+
     log_info "Generating CA certificate..."
     openssl req -new -x509 -days 365 \
         -key "${CERT_FILES[CA_KEY]}" \
@@ -243,21 +265,21 @@ create_certificates() {
         -sha256 \
         -out "${CERT_FILES[CA_CERT]}" \
         -subj "/C=${CERT_CONFIG[COUNTRY]}/ST=${CERT_CONFIG[STATE]}/L=${CERT_CONFIG[CITY]}/O=${CERT_CONFIG[ORGANISATION]}/OU=${CERT_CONFIG[OU]}/CN=${CERT_CONFIG[CN]}/emailAddress=${CERT_CONFIG[EMAIL]}"
-    
+
     cat "${CERT_FILES[CA_CERT]}" >> /etc/ssl/certs/ca-certificates.crt
     update-ca-certificates
-    
+
     log_info "Generating server certificates..."
     openssl genrsa -out "${CERT_FILES[SERVER_KEY]}" 4096
     openssl req -subj "/CN=$HOST" -sha256 -new \
         -key "${CERT_FILES[SERVER_KEY]}" \
         -out server.csr
-    
+
     cat > server-extfile.cnf << EOF
 subjectAltName = DNS:$HOST,IP:$DOCKER_CONTAINER_IP
 extendedKeyUsage = serverAuth
 EOF
-    
+
     openssl x509 -req -days 365 -sha256 \
         -in server.csr \
         -CA "${CERT_FILES[CA_CERT]}" \
@@ -266,15 +288,15 @@ EOF
         -CAcreateserial \
         -out "${CERT_FILES[SERVER_CERT]}" \
         -extfile server-extfile.cnf
-    
+
     log_info "Generating client certificates..."
     openssl genrsa -out "${CERT_FILES[CLIENT_KEY]}" 4096
     openssl req -subj '/CN=client' -new \
         -key "${CERT_FILES[CLIENT_KEY]}" \
         -out client.csr
-    
+
     echo "extendedKeyUsage = clientAuth" > client-extfile.cnf
-    
+
     openssl x509 -req -days 365 -sha256 \
         -in client.csr \
         -CA "${CERT_FILES[CA_CERT]}" \
@@ -283,14 +305,14 @@ EOF
         -CAcreateserial \
         -out "${CERT_FILES[CLIENT_CERT]}" \
         -extfile client-extfile.cnf
-    
+
     rm -f server.csr client.csr server-extfile.cnf client-extfile.cnf
-    
+
     zip -j cert.zip "${CERT_FILES[CA_CERT]}" "${CERT_FILES[CLIENT_CERT]}" "${CERT_FILES[CLIENT_KEY]}"
-    
+
     chmod 0400 "${CERT_FILES[CA_KEY]}" "${CERT_FILES[CLIENT_KEY]}" "${CERT_FILES[SERVER_KEY]}"
     chmod 0444 "${CERT_FILES[CA_CERT]}" "${CERT_FILES[SERVER_CERT]}" "${CERT_FILES[CLIENT_CERT]}"
-    
+
     log_success "Certificates created successfully in $cert_dir"
     log_info "Generated secrets:"
     log_info "  CA password: $ca_password"
@@ -300,45 +322,45 @@ configure_docker_tls() {
     local cert_dir="${CONFIG[WORKING_DIR]}/cert"
     local docker_conf_dir="/etc/systemd/system/docker.service.d"
     local docker_conf_file="$docker_conf_dir/override.conf"
-    
+
     log_info "Configuring Docker for TLS..."
-    
+
     local required_certs=(
         "$cert_dir/${CERT_FILES[CA_CERT]}"
         "$cert_dir/${CERT_FILES[SERVER_CERT]}"
         "$cert_dir/${CERT_FILES[SERVER_KEY]}"
     )
-    
+
     local missing_certs=()
     for cert in "${required_certs[@]}"; do
         if [[ ! -f $cert ]]; then
             missing_certs+=("$cert")
         fi
     done
-    
+
     if [[ ${#missing_certs[@]} -gt 0 ]]; then
         log_info "Generating missing certificates..."
         create_certificates
     fi
-    
+
     mkdir -p "$docker_conf_dir"
-    
+
     if [[ -f $docker_conf_file ]]; then
         cp "$docker_conf_file" "$docker_conf_file.backup"
     fi
-    
+
     local dockerd_path
     dockerd_path=$(command -v dockerd) || error_exit "dockerd not found"
-    
+
     cat > "$docker_conf_file" << EOF
 [Service]
 ExecStart=
 ExecStart=$dockerd_path --tls --tlsverify --tlscacert=$cert_dir/${CERT_FILES[CA_CERT]} --tlscert=$cert_dir/${CERT_FILES[SERVER_CERT]} --tlskey=$cert_dir/${CERT_FILES[SERVER_KEY]} -H=172.17.0.1:2376 -H=fd://
 EOF
-    
+
     systemctl daemon-reload
     systemctl restart docker.service
-    
+
     if netstat -lntp 2>/dev/null | grep -q dockerd; then
         log_success "Docker TLS configuration complete"
     else
@@ -351,9 +373,9 @@ install_ctfd() {
     local plugin_name="CTFd-Docker-Challenges"
     local plugin_path="$working_dir/$plugin_name"
     local compose_file="$working_dir/infra/docker-compose.yml"
-    
+
     log_info "Installing CTFd..."
-    
+
     if [[ ! -d $plugin_path ]]; then
         log_info "Cloning CTFd Docker Challenges plugin..."
         git -C "$working_dir" clone "$DOCKER_PLUGIN_REPO"
@@ -361,31 +383,31 @@ install_ctfd() {
         log_info "Plugin already exists, updating..."
         git -C "$plugin_path" pull
     fi
-    
+
     if [[ -f $compose_file ]]; then
         cp "$compose_file" "$compose_file.backup"
     fi
-    
+
     log_info "Generating secure secrets..."
-    
+
     local secret_key
     local db_password
     local db_root_password
-    
+
     secret_key=$(generate_password 32)
     db_password=$(generate_password 16)
     db_root_password=$(generate_password 16)
-    
+
     log_info "Updating configuration with new secrets..."
-    
+
     sed -i "s/SECRET_KEY=.*/SECRET_KEY=$secret_key/" "$compose_file"
-    
+
     sed -i "s/db_password/$db_password/g" "$compose_file"
     sed -i "s/db_root_password/$db_root_password/g" "$compose_file"
     log_info "Configuration updated with new secrets"
 
     sed -i "s|BASE_DOMAIN=.*|BASE_DOMAIN=${CONFIG[CTFD_URL]}|" "$compose_file"
-    
+
     log_info "Pulling necessary docker images..."
     docker compose -f "$compose_file" pull -q
     log_success "Docker images successfully pulled"
@@ -397,10 +419,10 @@ install_ctfd() {
 
     log_info "To start the CTFd containers, please run the following command in a properly configured session:"
     echo -e "\tdocker compose -f "$compose_file" up -d"
-    
+
     log_success "CTFd installation complete!"
     log_info "Download certificates with: scp -r ${SUDO_USER:-$USER}@<server_ip>:${CONFIG[WORKING_DIR]}/cert/cert.zip <local_path>"
-    
+
     log_info "Generated secrets:"
     log_info "  Secret Key: $secret_key"
     log_info "  DB Password: $db_password"
@@ -427,20 +449,20 @@ create_and_set_owner() {
 
 main() {
     log_info "Starting CTFd server setup..."
-    
+
     update_system
-    
+
     install_pipx
     install_docker
-    
+
     create_certificates
-    
+
     configure_docker_tls
 
     create_and_set_owner
-    
+
     install_ctfd
-    
+
     log_success "CTFd server setup completed successfully!"
 }
 
