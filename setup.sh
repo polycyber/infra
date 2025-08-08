@@ -368,6 +368,42 @@ EOF
     fi
 }
 
+copy_themes() {
+    local working_dir="${CONFIG[WORKING_DIR]}"
+    local source_theme="$working_dir/infra/core-beta"
+    local themes_dir="$working_dir/data/CTFd/themes"
+    
+    log_info "Setting up custom themes..."
+    
+    # Check if source theme exists
+    if [[ ! -d "$source_theme" ]]; then
+        log_warning "Theme source directory not found: $source_theme"
+        log_warning "Please ensure the core-beta theme exists in the infra folder"
+        return 1
+    fi
+    mkdir -p "$themes_dir"
+    
+    log_info "Copying core-beta theme..."
+    if cp -r "$source_theme" "$themes_dir/core-beta"; then
+        log_success "core-beta theme copied successfully"
+    else
+        log_error "Failed to copy core-beta theme"
+        return 1
+    fi
+    
+    log_info "Copying core-beta theme for custom themes..."
+    if cp -r "$source_theme" "$themes_dir/custom"; then
+        log_success "Custom theme created successfully"
+    else
+        log_error "Failed to create custom theme"
+        return 1
+    fi
+        
+    log_success "Themes setup completed successfully"
+    
+    return 0
+}
+
 install_ctfd() {
     local working_dir="${CONFIG[WORKING_DIR]}"
     local plugin_name="CTFd-Docker-Challenges"
@@ -413,8 +449,15 @@ install_ctfd() {
     log_success "Docker images successfully pulled"
 
     if [[ "${CONFIG[THEME]}" == "true" ]]; then
-        log_warning "Custom theme enabled. Make sure to place your theme in the theme folder before starting the docker compose."
-        sed -i '/#.*themes:/s/^#//' "$compose_file"
+        log_info "Custom theme option enabled"
+        
+        if copy_themes; then
+            sed -i '/#.*themes:/s/^#//' "$compose_file"
+            log_success "Theme volume mount enabled in docker-compose.yml"
+        else
+            log_warning "Theme copy failed, but continuing with setup"
+            log_warning "You may need to manually copy themes later"
+        fi
     fi
 
     log_info "To start the CTFd containers, please run the following command in a properly configured session:"
@@ -433,16 +476,19 @@ create_and_set_owner() {
     local working_dir="${CONFIG[WORKING_DIR]}"
     local upload_folder="$working_dir/data/CTFd/uploads"
     local log_folder="$working_dir/data/CTFd/logs"
+    local themes_folder="$working_dir/data/CTFd/themes"
 
     log_info "Creating necessary directories and setting ownership..."
 
     # Create directories
     mkdir -p "$upload_folder"
     mkdir -p "$log_folder"
+    mkdir -p "$themes_folder"
 
     # Change ownership to 1001
     chown -R 1001:1001 "$upload_folder"
     chown -R 1001:1001 "$log_folder"
+    chown -R 1001:1001 "$themes_folder"
 
     log_success "Directories created and ownership set successfully"
 }
