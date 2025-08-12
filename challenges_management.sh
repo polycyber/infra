@@ -43,6 +43,7 @@ declare -A CONFIG=(
     [SKIP_DOCKER_CHECK]="false"
     [BACKUP_BEFORE_SYNC]="false"
     [CONFIG_FILE]=""
+    [DEPLOY_COMPOSE]="true"
 )
 
 show_usage() {
@@ -69,6 +70,9 @@ BEHAVIOR OPTIONS:
     --parallel-builds N     Number of parallel Docker builds (default: 4)
     --backup-before-sync    Create backup before syncing challenges
     
+DOCKER COMPOSE OPTIONS:
+    --no-deploy-compose     Skip docker-compose deployment during ingest
+    
 DEBUGGING:
     --debug                 Enable debug output
     --skip-docker-check     Skip Docker daemon availability check
@@ -76,11 +80,14 @@ DEBUGGING:
     --version               Show version information
 
 EXAMPLES:
-  # Full setup (build + ingest)
+  # Full setup (build + ingest + deploy compose)
   $SCRIPT_NAME --ctf-repo PolyPwnCTF-2025-challenges
   
   # Build only specific categories
   $SCRIPT_NAME --action build --ctf-repo PolyPwnCTF-2025-challenges --categories "web,crypto"
+  
+  # Ingest without deploying compose files
+  $SCRIPT_NAME --action ingest --ctf-repo PolyPwnCTF-2025-challenges --no-deploy-compose
   
   # Sync existing challenges with force update
   $SCRIPT_NAME --action sync --ctf-repo PolyPwnCTF-2025-challenges --force
@@ -96,6 +103,7 @@ CONFIG FILE FORMAT:
     CTF_REPO=PolyPwnCTF-2025-challenges
     WORKING_DIR=/opt/ctf
     PARALLEL_BUILDS=8
+    DEPLOY_COMPOSE=true
 EOF
 }
 
@@ -175,6 +183,10 @@ parse_arguments() {
                 [[ -n ${2:-} ]] || error_exit "Missing value for --config"
                 CONFIG[CONFIG_FILE]="$2"
                 shift 2
+                ;;
+            --no-deploy-compose)
+                CONFIG[DEPLOY_COMPOSE]="false"
+                shift
                 ;;
             --dry-run)
                 CONFIG[DRY_RUN]="true"
@@ -351,6 +363,55 @@ get_challenge_info() {
             grep '^name:' "$challenge_yml" 2>/dev/null | sed -E 's/^name:[[:space:]]*//' | tr -d '"'
             ;;
     esac
+}
+
+deploy_single_compose() {
+    local challenge_path="$1"
+    local challenge_name
+    local compose_file
+    
+    challenge_name=$(basename "$challenge_path")
+    compose_file="$challenge_path/docker-compose.yml"
+    
+    [[ -f "$compose_file" ]] || {
+        log_debug "No docker-compose.yml found for: $challenge_name"
+        return 0
+    }
+    
+    log_info "Deploying docker-compose for challenge: $challenge_name"
+    log_debug "Compose file: $compose_file"
+    
+    if [[ "${CONFIG[DRY_RUN]}" == "false" ]]; then
+        
+        # Deploy the compose stack
+        local compose_output
+        local exit_code
+        
+        if command -v docker-compose &> /dev/null; then
+            compose_output=$(cd $challenge_path && docker-compose up -d 2>&1)
+            exit_code=$?
+        else
+            compose_output=$(cd $challenge_path && docker compose up -d 2>&1)
+            exit_code=$?
+        fi
+        
+        if [[ $exit_code -eq 0 ]]; then
+            log_success "Successfully deployed compose stack: $challenge_name"
+            log_debug "Compose output: $compose_output"
+            return 0
+        else
+            log_error "Failed to deploy compose stack: $challenge_name"
+            log_error "Error output: $compose_output"
+            return 1
+        fi
+    else
+        if command -v docker-compose &> /dev/null; then
+            echo "Would deploy: docker-compose -f "$compose_file" up -d"
+        else
+            echo "Would deploy: docker compose -f "$compose_file" up -d"
+        fi
+        return 0
+    fi
 }
 
 build_single_challenge() {
@@ -694,6 +755,17 @@ ingest_challenges() {
             if [[ $exit_code -eq 0 ]]; then
                 log_success "Successfully installed: $challenge_name"
                 successful_installs=$((successful_installs + 1))
+                
+                # Deploy docker-compose.yml if enabled and present
+                if [[ "${CONFIG[DEPLOY_COMPOSE]}" == "true" ]]; then
+                    if [[ -f "$challenge_path/docker-compose.yml" ]]; then
+                        if deploy_single_compose "$challenge_path"; then
+                            log_debug "Docker Compose deployed for: $challenge_name"
+                        else
+                            log_warning "Failed to deploy docker-compose for: $challenge_name"
+                        fi
+                    fi
+                fi
             else
                 # Check for specific error patterns
                 if echo "$install_output" | grep -q "Found already existing challenge with the same name"; then
@@ -729,6 +801,9 @@ ingest_challenges() {
             fi
         else
             echo "Would install: ctf challenge install '$challenge_path'"
+            if [[ "${CONFIG[DEPLOY_COMPOSE]}" == "true" && -f "$challenge_path/docker-compose.yml" ]]; then
+                echo "Would deploy docker-compose for: $challenge_name"
+            fi
             successful_installs=$((successful_installs + 1))
         fi
     done
@@ -843,6 +918,17 @@ sync_challenges() {
             if [[ $exit_code -eq 0 ]]; then
                 log_success "Successfully synced: $challenge_name"
                 total_synced=$((total_synced + 1))
+                
+                # Deploy docker-compose.yml if enabled and present
+                if [[ "${CONFIG[DEPLOY_COMPOSE]}" == "true" ]]; then
+                    if [[ -f "$challenge_path/docker-compose.yml" ]]; then
+                        if deploy_single_compose "$challenge_path"; then
+                            log_debug "Docker Compose deployed for: $challenge_name"
+                        else
+                            log_warning "Failed to deploy docker-compose for: $challenge_name"
+                        fi
+                    fi
+                fi
             else
                 log_error "Failed to sync: $challenge_name"
                 log_debug "Error output: $sync_output"
@@ -851,6 +937,9 @@ sync_challenges() {
             fi
         else
             echo "Would sync: ctf challenge sync $sync_args '$challenge_path'"
+            if [[ "${CONFIG[DEPLOY_COMPOSE]}" == "true" && -f "$challenge_path/docker-compose.yml" ]]; then
+                echo "Would deploy docker-compose for: $challenge_name"
+            fi
             total_synced=$((total_synced + 1))
         fi
     done
@@ -882,12 +971,14 @@ show_status() {
     echo "  Working Directory: ${CONFIG[WORKING_DIR]}"
     echo "  CTF Repository: ${CONFIG[CTF_REPO]}"
     echo "  Challenge Path: ${CONFIG[CHALLENGE_PATH]}"
+    echo "  Deploy Compose: ${CONFIG[DEPLOY_COMPOSE]}"
     echo
     
     # Challenge statistics
     local total_challenges=0
     local docker_challenges=0
     local static_challenges=0
+    local compose_challenges=0
     local categories=()
     
     for category in "${CONFIG[CHALLENGE_PATH]}"/*; do
@@ -899,7 +990,11 @@ show_status() {
         local category_count=0
         for challenge in "$category"/*; do
             [[ -d "$challenge" ]] || continue
-            local challenge_yml="$category/$(basename "$challenge")/challenge.yml"
+            local challenge_name
+            challenge_name=$(basename "$challenge")
+            local challenge_yml="$category/$challenge_name/challenge.yml"
+            local compose_file="$category/$challenge_name/docker-compose.yml"
+            
             if [[ -f "$challenge_yml" ]]; then
                 total_challenges=$((total_challenges + 1))
                 category_count=$((category_count + 1))
@@ -909,6 +1004,11 @@ show_status() {
                     "docker") docker_challenges=$((docker_challenges + 1)) ;;
                     *) static_challenges=$((static_challenges + 1)) ;;
                 esac
+                
+                # Check for docker-compose.yml
+                if [[ -f "$compose_file" ]]; then
+                    compose_challenges=$((compose_challenges + 1))
+                fi
             fi
         done
         echo "  $category_name: $category_count challenges"
@@ -919,6 +1019,7 @@ show_status() {
     echo "  Total Challenges: $total_challenges"
     echo "  Docker Challenges: $docker_challenges"
     echo "  Static Challenges: $static_challenges"
+    echo "  Compose Challenges: $compose_challenges"
     echo "  Categories: ${#categories[@]} (${categories[*]})"
     echo
     
@@ -936,6 +1037,43 @@ show_status() {
         fi
     else
         echo -e "${YELLOW}CTFcli: Not installed${NC}"
+    fi
+
+    # Show running compose services
+    if [[ $compose_challenges -gt 0 ]] && ([[ "${CONFIG[DRY_RUN]}" == "false" ]]); then
+        echo
+        echo -e "${CYAN}Running Compose Services:${NC}"
+        local running_services=0
+        for category in "${CONFIG[CHALLENGE_PATH]}"/*; do
+            [[ -d "$category" ]] || continue
+            for challenge in "$category"/*; do
+                [[ -d "$challenge" ]] || continue
+                local challenge_name
+                challenge_name=$(basename "$challenge")
+                local compose_file="$category/$challenge_name/docker-compose.yml"
+                
+                if [[ -f "$compose_file" ]]; then
+                    local project_name
+                    
+                    # Check if services are running
+                    local running_containers
+                    if command -v docker-compose &> /dev/null; then
+                        running_containers=$(docker-compose -f "$compose_file" ps -q 2>/dev/null | wc -l)
+                    else
+                        running_containers=$(docker compose -f "$compose_file" ps -q 2>/dev/null | wc -l)
+                    fi
+                    
+                    if [[ $running_containers -gt 0 ]]; then
+                        echo "  $challenge_name: $running_containers container(s) running"
+                        running_services=$((running_services + 1))
+                    fi
+                fi
+            done
+        done
+        
+        if [[ $running_services -eq 0 ]]; then
+            echo "  No compose services currently running"
+        fi
     fi
     
     echo

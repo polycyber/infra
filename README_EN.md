@@ -157,6 +157,7 @@ If you use the `--theme` option, the script will automatically mount the theme f
 | `--force` | Force operations (rebuild, overwrite) |
 | `--parallel-builds N` | Number of parallel builds (default: 4) |
 | `--backup-before-sync` | Create a backup before synchronization |
+| `--no-deploy-compose ` | Prevents the automatic deployment of static docker-compose challenges |
 
 #### Debug Options
 

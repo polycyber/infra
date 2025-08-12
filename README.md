@@ -158,6 +158,7 @@ Si vous utilisez l'option `--theme`, le script activera automatiquement le monta
 | `--force` | Force les opérations (reconstruction, écrasement) |
 | `--parallel-builds N` | Nombre de constructions parallèles (défaut: 4) |
 | `--backup-before-sync` | Crée une sauvegarde avant synchronisation |
+| `--no-deploy-compose ` | Empêche le déploiement automatique des challenges ayant des docker-compose statiques |
 
 #### Options de debug
 
