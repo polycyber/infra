@@ -355,7 +355,7 @@ configure_docker_tls() {
     cat > "$docker_conf_file" << EOF
 [Service]
 ExecStart=
-ExecStart=$dockerd_path --tls --tlsverify --tlscacert=$cert_dir/${CERT_FILES[CA_CERT]} --tlscert=$cert_dir/${CERT_FILES[SERVER_CERT]} --tlskey=$cert_dir/${CERT_FILES[SERVER_KEY]} -H=172.17.0.1:2376 -H=fd://
+ExecStart=$dockerd_path --tls --tlsverify --tlscacert=$cert_dir/${CERT_FILES[CA_CERT]} --tlscert=$cert_dir/${CERT_FILES[SERVER_CERT]} --tlskey=$cert_dir/${CERT_FILES[SERVER_KEY]} -H=0.0.0.0:2376 -H=fd://
 EOF
 
     systemctl daemon-reload
