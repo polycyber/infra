@@ -1,0 +1,281 @@
+<div role="tabpanel" class="tab-pane config-section" id="email">
+	{% set mailfrom_addr = mailfrom_addr if mailfrom_addr is defined and mailfrom_addr != None else "" %}
+	{% set mail_server = mail_server if mail_server is defined and mail_server != None else "" %}
+	{% set mail_port = mail_port if mail_port is defined and mail_port != None else "" %}
+
+	{% set mail_useauth = true if mail_useauth is defined and mail_useauth == True else false %}
+	{% set mail_ssl = true if mail_ssl is defined and mail_ssl == True else false %}
+	{% set mail_tls = true if mail_tls is defined and mail_tls == True else false %}
+
+	{% set mailgun_base_url = mailgun_base_url if mailgun_base_url is defined and mailgun_base_url != None else "" %}
+	{% set mailgun_api_key = mailgun_api_key if mailgun_api_key is defined and mailgun_api_key != None else "" %}
+
+	{% set formcls = Forms.config.EmailSettingsForm %}
+
+	{% set successful_registration_email_subject = successful_registration_email_subject if successful_registration_email_subject is defined and successful_registration_email_subject != None else formcls.successful_registration_email_subject.kwargs['default'] %}
+	{% set successful_registration_email_body = successful_registration_email_body if successful_registration_email_body is defined and successful_registration_email_body != None else formcls.successful_registration_email_body.kwargs['default'] %}
+	
+	{% set verification_email_subject = verification_email_subject if verification_email_subject is defined and verification_email_subject != None else formcls.verification_email_subject.kwargs['default'] %}
+	{% set verification_email_body = verification_email_body if verification_email_body is defined and verification_email_body != None else formcls.verification_email_body.kwargs['default'] %}
+
+	{% set user_creation_email_subject = user_creation_email_subject if user_creation_email_subject is defined and user_creation_email_subject != None else formcls.user_creation_email_subject.kwargs['default'] %}
+	{% set user_creation_email_body = user_creation_email_body if user_creation_email_body is defined and user_creation_email_body != None else formcls.user_creation_email_body.kwargs['default'] %}
+
+	{% set password_reset_subject = password_reset_subject if password_reset_subject is defined and password_reset_subject != None else formcls.password_reset_subject.kwargs['default'] %}
+	{% set password_reset_body = password_reset_body if password_reset_body is defined and password_reset_body != None else formcls.password_reset_body.kwargs['default'] %}
+
+	{% set password_change_alert_subject = password_change_alert_subject if password_change_alert_subject is defined and password_change_alert_subject != None else formcls.password_change_alert_subject.kwargs['default'] %}
+	{% set password_change_alert_body = password_change_alert_body if password_change_alert_body is defined and password_change_alert_body != None else formcls.password_change_alert_body.kwargs['default'] %}
+
+	{% with form = Forms.config.EmailSettingsForm(
+		mailfrom_addr=mailfrom_addr, 
+		mail_server=mail_server, 
+		mail_port=mail_port, 
+		mail_useauth=mail_useauth,
+		mail_ssl=mail_ssl,
+		mail_tls=mail_tls,
+		mailgun_base_url=mailgun_base_url,
+		mailgun_api_key=mailgun_api_key,
+		successful_registration_email_subject=successful_registration_email_subject,
+		successful_registration_email_body=successful_registration_email_body,
+		verification_email_subject=verification_email_subject,
+		verification_email_body=verification_email_body,
+		user_creation_email_subject=user_creation_email_subject,
+		user_creation_email_body=user_creation_email_body,
+		password_reset_subject=password_reset_subject,
+		password_reset_body=password_reset_body,
+		password_change_alert_subject=password_change_alert_subject,
+		password_change_alert_body=password_change_alert_body,
+	) %}
+	<form method="POST" autocomplete="off" class="w-100">
+		<h5>Email notifications</h5>
+		<small class="form-text text-muted">
+			Customize the emails that CTFd sends your users with custom content using <a href="https://docs.ctfd.io/docs/settings/emails/#email-content" target="_blank">predefined variables</a>, mail servers, and addresses.
+		</small>
+		<ul class="nav nav-tabs mt-3" role="tablist">
+			<li class="nav-item active">
+				<a class="nav-link active" href="#email-server-tab" role="tab" data-toggle="tab">
+					Mail Server
+				</a>
+			</li>
+			<li class="nav-item">
+				<a class="nav-link" href="#registration-email-tab" role="tab" data-toggle="tab">
+					Registration
+				</a>
+			</li>
+			<li class="nav-item">
+				<a class="nav-link" href="#verification-email-tab" role="tab" data-toggle="tab">
+					Verification
+				</a>
+			</li>
+			<li class="nav-item">
+				<a class="nav-link" href="#account-details-email-tab" role="tab" data-toggle="tab">Account Details</a>
+			</li>
+			<li class="nav-item">
+				<a class="nav-link" href="#password-reset-email-tab" role="tab" data-toggle="tab">Password Reset</a>
+			</li>
+		</ul>
+
+		<div class="tab-content">
+			<div role="tabpanel" class="tab-pane active" id="email-server-tab">
+				<div class="form-group">
+					{{ form.mailfrom_addr.label(class="pt-3") }}
+					{{ form.mailfrom_addr(class="form-control") }}
+					<small class="form-text text-muted">
+						{{ form.mailfrom_addr.description }}
+					</small>
+				</div>
+				<div class="form-group">
+					{{ form.mail_server.label() }}
+					<a class="float-right" href="https://docs.ctfd.io/docs/settings/emails#email-server" target="_blank">
+						<i class="far fa-question-circle pr-2"></i>
+					</a>
+					{{ form.mail_server(class="form-control") }}
+					<small class="form-text text-muted">
+						{{ form.mail_server.description }}
+					</small>
+				</div>
+				<div class="form-group">
+					{{ form.mail_port.label() }}
+					{{ form.mail_port(class="form-control") }}
+					<small class="form-text text-muted">
+						{{ form.mail_port.description }}
+					</small>
+				</div>
+				<div class="form-check">
+					{{ form.mail_useauth() }}
+					{{ form.mail_useauth.label() }}
+				</div>
+				<div id="mail_username_password">
+					<div class="form-group">
+						{{ form.mail_username.label() }}
+						{% if mail_username is defined and mail_username != None %}
+							<label>
+								<sup class="form-text text-muted">(A mail server username is currently set)</sup>
+							</label>
+						{% endif %}
+						{{ form.mail_username(class="form-control", autocomplete="off") }}
+						<small class="form-text text-muted">
+							{{ form.mail_username.description }}
+						</small>
+					</div>
+					<div class="form-group">
+						{{ form.mail_password.label() }}
+						{% if mail_password is defined and mail_password != None %}
+							<label>
+								<sup class="form-text text-muted">(A mail server password is currently set)</sup>
+							</label>
+						{% endif %}
+						{{ form.mail_password(class="form-control", autocomplete="off") }}
+						<small class="form-text text-muted">
+							{{ form.mail_password.description }}
+						</small>
+					</div>
+					<sup class="float-right">Uncheck setting and update to remove username and password</sup>
+					<br>
+				</div>
+				<div class="form-check">
+					{{ form.mail_ssl() }}
+					{{ form.mail_ssl.label() }}
+				</div>
+				<div class="form-check">
+					{{ form.mail_tls() }}
+					{{ form.mail_tls.label() }}
+				</div>
+				<br>
+				<div class="alert alert-warning" role="alert">
+					Mailgun integration is deprecated! Please see your Mailgun account for SMTP credentials.
+				</div>
+				<div class="form-group">
+					{{ form.mailgun_base_url.label() }}
+					{{ form.mailgun_base_url(class="form-control") }}
+					<small class="form-text text-muted">
+						{{ form.mailgun_base_url.description }}
+					</small>
+				</div>
+				<div class="form-group">
+					{{ form.mailgun_api_key.label() }}
+					{{ form.mailgun_api_key(class="form-control") }}
+					<small class="form-text text-muted">
+						{{ form.mailgun_api_key.description }}
+					</small>
+				</div>
+			</div>
+			<div role="tabpanel" class="tab-pane" id="registration-email-tab">
+				<div class="form-group">
+					<label class="pt-3">
+						Account Registration<br>
+						<small class="form-text text-muted">
+							Email sent to users after they've finished registering
+						</small>
+					</label>
+					<div>
+						{{ form.successful_registration_email_subject.label() }}
+						{{ form.successful_registration_email_subject(class="form-control") }}
+						<small class="form-text text-muted">
+							{{ form.successful_registration_email_subject.description }}
+						</small>
+						{{ form.successful_registration_email_body.label() }}
+						{{ form.successful_registration_email_body(class="form-control", rows="5") }}
+						<small class="form-text text-muted">
+							{{ form.successful_registration_email_body.description }}
+						</small>
+					</div>
+				</div>
+			</div>
+
+			<div role="tabpanel" class="tab-pane" id="verification-email-tab">
+				<div class="form-group">
+					<label class="pt-3">
+						Account Verification<br>
+						<small class="form-text text-muted">
+							Email sent to users to confirm their account at the address they provided during registration. You can require email verification in the <a href="#accounts">Accounts settings</a>.
+						</small>
+					</label>
+					<div>
+						{{ form.verification_email_subject.label() }}
+						{{ form.verification_email_subject(class="form-control") }}
+						<small class="form-text text-muted">
+							{{ form.verification_email_subject.description }}
+						</small>
+						{{ form.verification_email_body.label() }}
+						{{ form.verification_email_body(class="form-control", rows="5") }}
+						<small class="form-text text-muted">
+							{{ form.verification_email_body.description }}
+						</small>
+					</div>
+				</div>
+			</div>
+
+			<div role="tabpanel" class="tab-pane" id="account-details-email-tab">
+				<div class="form-group">
+					<label class="pt-3">
+						New Account Details<br>
+						<small class="form-text text-muted">
+							Email sent to new users <i>(manually created by an admin)</i> with their initial account details
+						</small>
+					</label>
+					<div>
+						{{ form.user_creation_email_subject.label() }}
+						{{ form.user_creation_email_subject(class="form-control") }}
+						<small class="form-text text-muted">
+							{{ form.user_creation_email_subject.description }}
+						</small>
+						{{ form.user_creation_email_body.label() }}
+						{{ form.user_creation_email_body(class="form-control", rows="5") }}
+						<small class="form-text text-muted">
+							{{ form.user_creation_email_body.description }}
+						</small>
+					</div>
+				</div>
+			</div>
+
+			<div role="tabpanel" class="tab-pane" id="password-reset-email-tab">
+				<div class="form-group">
+					<label class="pt-3">
+						Password Reset Request<br>
+						<small class="form-text text-muted">
+							Email sent whent a user requests a password reset
+						</small>
+					</label>
+					<div>
+						{{ form.password_reset_subject.label() }}
+						{{ form.password_reset_subject(class="form-control") }}
+						<small class="form-text text-muted">
+							{{ form.password_reset_subject.description }}
+						</small>
+						{{ form.password_reset_body.label() }}
+						{{ form.password_reset_body(class="form-control", rows="5") }}
+						<small class="form-text text-muted">
+							{{ form.password_reset_body.description }}
+						</small>
+					</div>
+				</div>
+
+				<div class="form-group">
+					<label class="pt-3">
+						Password Reset Confirmation<br>
+						<small class="form-text text-muted">
+							Email sent whent a user successfully resets their password
+						</small>
+					</label>
+					<div>
+						{{ form.password_change_alert_subject.label() }}
+						{{ form.password_change_alert_subject(class="form-control") }}
+						<small class="form-text text-muted">
+							{{ form.password_change_alert_subject.description }}
+						</small>
+						{{ form.password_change_alert_body.label() }}
+						{{ form.password_change_alert_body(class="form-control", rows="5") }}
+						<small class="form-text text-muted">
+							{{ form.password_change_alert_body.description }}
+						</small>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		{{ form.submit(class="btn btn-md btn-primary float-right") }}
+	</form>
+	{% endwith %}
+</div>

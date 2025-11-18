@@ -370,38 +370,60 @@ EOF
 
 copy_themes() {
     local working_dir="${CONFIG[WORKING_DIR]}"
-    local source_theme="$working_dir/infra/core-beta"
+    local infra_dir="$working_dir/infra"
     local themes_dir="$working_dir/data/CTFd/themes"
     
     log_info "Setting up custom themes..."
-    
-    # Check if source theme exists
-    if [[ ! -d "$source_theme" ]]; then
-        log_warning "Theme source directory not found: $source_theme"
-        log_warning "Please ensure the core-beta theme exists in the infra folder"
-        return 1
-    fi
     mkdir -p "$themes_dir"
     
-    log_info "Copying core-beta theme..."
-    if cp -r "$source_theme" "$themes_dir/core-beta"; then
-        log_success "core-beta theme copied successfully"
+    local has_errors=false
+    
+    # Copy admin theme
+    if [[ -d "$infra_dir/admin" ]]; then
+        log_info "Copying admin theme..."
+        if cp -r "$infra_dir/admin" "$themes_dir/admin"; then
+            log_success "admin theme copied successfully"
+        else
+            log_error "Failed to copy admin theme"
+            has_errors=true
+        fi
     else
-        log_error "Failed to copy core-beta theme"
-        return 1
+        log_warning "admin theme not found at: $infra_dir/admin"
+        has_errors=true
     fi
     
-    log_info "Copying core-beta theme for custom themes..."
-    if cp -r "$source_theme" "$themes_dir/custom"; then
-        log_success "Custom theme created successfully"
+    # Copy core theme
+    if [[ -d "$infra_dir/core" ]]; then
+        log_info "Copying core theme..."
+        if cp -r "$infra_dir/core" "$themes_dir/core"; then
+            log_success "core theme copied successfully"
+        else
+            log_error "Failed to copy core theme"
+            has_errors=true
+        fi
     else
-        log_error "Failed to create custom theme"
-        return 1
+        log_warning "core theme not found at: $infra_dir/core"
+        has_errors=true
     fi
-        
-    log_success "Themes setup completed successfully"
     
-    return 0
+    # Create custom theme from core
+    if [[ -d "$infra_dir/core" ]]; then
+        log_info "Copying core theme as custom theme..."
+        if cp -r "$infra_dir/core" "$themes_dir/custom"; then
+            log_success "Custom theme created successfully"
+        else
+            log_error "Failed to create custom theme"
+            has_errors=true
+        fi
+    fi
+    
+    if $has_errors; then
+        log_warning "Themes setup completed with some warnings/errors"
+        return 1
+    else
+        log_success "Themes setup completed successfully"
+        return 0
+    fi
 }
 
 install_ctfd() {

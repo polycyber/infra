@@ -10,7 +10,7 @@ BACKUP_BASE_DIR="$BASE_PATH/backups"
 CTFD_UPLOADS_PATH="$BASE_PATH/data/CTFd/uploads"
 
 # Backup retention (number of backups to keep)
-RETENTION_DAYS=30
+MAX_BACKUPS=5
 
 # Script variables
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
@@ -109,11 +109,15 @@ rm -rf "${BACKUP_DIR}"
 ln -sf "${BACKUP_BASE_DIR}/ctfd_backup_${TIMESTAMP}.tar.gz" "${BACKUP_BASE_DIR}/latest_backup.tar.gz"
 
 # Clean up old backups
-log_message "Cleaning up backups older than ${RETENTION_DAYS} days..."
-find "${BACKUP_BASE_DIR}" -name "ctfd_backup_*.tar.gz" -type f -mtime +${RETENTION_DAYS} -delete
-BACKUP_COUNT=$(find "${BACKUP_BASE_DIR}" -name "ctfd_backup_*.tar.gz" -type f | wc -l)
-log_message "Retained ${BACKUP_COUNT} backup(s)"
+log_message "Cleaning up old backups, keeping only the ${MAX_BACKUPS} most recent..."
+BACKUP_FILES=$(find "${BACKUP_BASE_DIR}" -name "ctfd_backup_*.tar.gz" -type f | sort -r)
+BACKUP_COUNT=$(echo "$BACKUP_FILES" | wc -l)
 
-log_message "========== CTFd Backup Completed Successfully =========="
-log_message "Backup file: ctfd_backup_${TIMESTAMP}.tar.gz"
+if [ $BACKUP_COUNT -gt $MAX_BACKUPS ]; then
+    echo "$BACKUP_FILES" | tail -n +$((MAX_BACKUPS + 1)) | xargs rm -f
+    log_message "Deleted $((BACKUP_COUNT - MAX_BACKUPS)) old backup(s)"
+fi
+
+REMAINING_COUNT=$(find "${BACKUP_BASE_DIR}" -name "ctfd_backup_*.tar.gz" -type f | wc -l)
+log_message "Retained ${REMAINING_COUNT} backup(s)"
 exit 0
