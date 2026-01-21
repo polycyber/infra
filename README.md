@@ -66,6 +66,7 @@ Script Bash avancé pour la construction, l'ingestion et la synchronisation des 
 | `--ctfd-url URL` | URL/domaine de votre serveur CTFd | ✅ Oui |
 | `--working-folder DIR` | Répertoire de travail (défaut: `/home/$USER`) | ❌ Non |
 | `--theme` | Active l'utilisation d'un thème personnalisé | ❌ Non |
+| `--backup-schedule TYPE` | Fréquence de sauvegarde de la base de données (`daily` (défaut), `hourly`, `10min`) | ❌ Non |
 | `--help` | Affiche l'aide | ❌ Non |
 
 #### Exemples d'installation
@@ -148,7 +149,6 @@ Si vous utilisez l'option `--theme`, le script activera automatiquement le monta
 | `--action ACTION` | Action à effectuer (all, build, ingest, sync, status, cleanup) | ❌ Non |
 | `--working-folder DIR` | Répertoire de travail (défaut: `/home/$USER`) | ❌ Non |
 | `--config FILE` | Charger la configuration depuis un fichier | ❌ Non |
-| `--backup-schedule TYPE` | Fréquence de sauvegarde de la base de données (`daily` (défaut), `hourly`, `10min`) | ❌ Non |
 
 #### Options de filtrage
 
