@@ -77,7 +77,13 @@ Bash script for building, ingesting, and synchronizing CTF challenges with suppo
 ./setup.sh --ctfd-url example.com --working-folder /opt/ctfd
 
 # Installation with custom theme
-./setup.sh --ctfd-url exemple.com --theme
+./setup.sh --ctfd-url example.com --theme
+
+# Hourly backup
+./setup.sh --ctfd-url example.com --backup-schedule hourly
+
+# Backup every 10 minutes
+./setup.sh --ctfd-url example.com --backup-schedule 10min
 
 # Display help
 ./setup.sh --help
@@ -138,9 +144,10 @@ If you use the `--theme` option, the script will automatically mount the theme f
 | Option | Description | Required |
 |--------|-------------|-------------|
 | `--ctf-repo REPO` | Name of the challenge repository present in the working directory | ✅ Yes |
-| `--action ACTION` | Action to perform (all, build, ingest, sync, status, cleanup) | ❌ No |
+| `--action ACTION` | Action to perform (all (default), build, ingest, sync, status, cleanup) | ❌ No |
 | `--working-folder DIR` | Working directory (default: `/home/$USER`) | ❌ No |
 | `--config FILE` | Load configuration from a file | ❌ No |
+| `--backup-schedule TYPE` | Database backup frequency (`daily` (default), `hourly`, `10min`) | ❌ No |
 
 #### Filtering Options
 

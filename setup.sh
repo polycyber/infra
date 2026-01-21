@@ -53,6 +53,7 @@ declare -A CONFIG=(
     [CONFIGURE_DOCKER]="true"
     [WORKING_DIR]="/home/${SUDO_USER:-$USER}"
     [THEME]="false"
+    [BACKUP_SCHEDULE]="daily"
 )
 
 declare -A CERT_CONFIG=(
@@ -86,12 +87,14 @@ Options:
     --ctfd-url URL          Set CTFd URL (mandatory)
     --working-folder DIR    Set working directory (default: /home/\$USER)
     --theme                 Enable custom theme (default: false)
+    --backup-schedule TYPE  Set backup schedule: daily, hourly, or 10min (default: daily)
     --help                  Show this help message
 
 Examples:
     $SCRIPT_NAME --ctfd-url example.com
     $SCRIPT_NAME --ctfd-url example.com --working-folder /opt/ctfd
     $SCRIPT_NAME --ctfd-url example.com --theme
+    $SCRIPT_NAME --ctfd-url example.com --backup-schedule hourly
 EOF
 }
 
@@ -111,6 +114,18 @@ parse_arguments() {
             --theme)
                 CONFIG[THEME]="true"
                 shift
+                ;;
+            --backup-schedule)
+                [[ -n ${2:-} ]] || error_exit "Missing value for --backup-schedule"
+                case ${2,,} in
+                    daily|hourly|10min)
+                        CONFIG[BACKUP_SCHEDULE]="${2,,}"
+                        ;;
+                    *)
+                        error_exit "Invalid backup schedule: $2. Must be one of: daily, hourly, 10min"
+                        ;;
+                esac
+                shift 2
                 ;;
             --help)
                 show_usage
@@ -368,6 +383,86 @@ EOF
     fi
 }
 
+setup_backup_script() {
+    local working_dir="${CONFIG[WORKING_DIR]}"
+    local infra_dir="$working_dir/infra"
+    local backup_script_src="$infra_dir/backup_db.sh"
+    local backup_script_dest="$working_dir/backup_db.sh"
+    
+    log_info "Setting up database backup script..."
+    
+    if [[ ! -f "$backup_script_src" ]]; then
+        log_error "Backup script not found at: $backup_script_src"
+        log_warning "Skipping backup script setup"
+        return 1
+    fi
+    
+    # Copy backup script to working directory
+    cp "$backup_script_src" "$backup_script_dest"
+    chmod +x "$backup_script_dest"
+    chown "${SUDO_USER:-$USER}:${SUDO_USER:-$USER}" "$backup_script_dest"
+    
+    log_success "Backup script copied to: $backup_script_dest"
+}
+
+setup_backup_cron() {
+    local working_dir="${CONFIG[WORKING_DIR]}"
+    local backup_script="$working_dir/backup_db.sh"
+    local cron_log="$working_dir/cron_backup.log"
+    local user="${SUDO_USER:-$USER}"
+    local schedule="${CONFIG[BACKUP_SCHEDULE]}"
+    
+    log_info "Setting up backup cron job with schedule: $schedule"
+    
+    # Define cron schedule based on configuration
+    local cron_schedule
+    case "$schedule" in
+        daily)
+            cron_schedule="0 4 * * *"
+            ;;
+        hourly)
+            cron_schedule="0 * * * *"
+            ;;
+        10min)
+            cron_schedule="*/10 * * * *"
+            ;;
+        *)
+            log_error "Invalid backup schedule: $schedule"
+            return 1
+            ;;
+    esac
+    
+    # Create cron entry
+    local cron_entry="$cron_schedule $backup_script >> $cron_log 2>&1"
+    
+    # Check if cron entry already exists
+    if crontab -u "$user" -l 2>/dev/null | grep -Fq "$backup_script"; then
+        log_warning "Cron job for backup script already exists, skipping..."
+        return 0
+    fi
+    
+    # Add cron entry
+    (crontab -u "$user" -l 2>/dev/null || true; echo "$cron_entry") | crontab -u "$user" -
+    
+    # Create log file with proper permissions
+    touch "$cron_log"
+    chown "$user:$user" "$cron_log"
+    
+    case "$schedule" in
+        daily)
+            log_success "Cron job added: Daily backup at 4:00 AM"
+            ;;
+        hourly)
+            log_success "Cron job added: Hourly backups at the top of each hour"
+            ;;
+        10min)
+            log_success "Cron job added: Backups every 10 minutes"
+            ;;
+    esac
+    
+    log_info "Backup logs will be written to: $cron_log"
+}
+
 copy_themes() {
     local working_dir="${CONFIG[WORKING_DIR]}"
     local infra_dir="$working_dir/infra"
@@ -530,6 +625,10 @@ main() {
     create_and_set_owner
 
     install_ctfd
+
+    # Setup database backup
+    setup_backup_script
+    setup_backup_cron
 
     log_success "CTFd server setup completed successfully!"
 }

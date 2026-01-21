@@ -80,6 +80,12 @@ Script Bash avancé pour la construction, l'ingestion et la synchronisation des 
 # Installation avec thème personnalisé activé
 ./setup.sh --ctfd-url exemple.com --theme
 
+# Sauvegarde toutes les heures
+./setup.sh --ctfd-url exemple.com --backup-schedule hourly
+
+# Sauvegarde toutes les 10 minutes
+./setup.sh --ctfd-url exemple.com --backup-schedule 10min
+
 # Afficher l'aide
 ./setup.sh --help
 ```
@@ -142,6 +148,7 @@ Si vous utilisez l'option `--theme`, le script activera automatiquement le monta
 | `--action ACTION` | Action à effectuer (all, build, ingest, sync, status, cleanup) | ❌ Non |
 | `--working-folder DIR` | Répertoire de travail (défaut: `/home/$USER`) | ❌ Non |
 | `--config FILE` | Charger la configuration depuis un fichier | ❌ Non |
+| `--backup-schedule TYPE` | Fréquence de sauvegarde de la base de données (`daily` (défaut), `hourly`, `10min`) | ❌ Non |
 
 #### Options de filtrage
 
