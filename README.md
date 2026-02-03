@@ -65,7 +65,7 @@ Script Bash avancé pour la construction, l'ingestion et la synchronisation des 
 |--------|-------------|-------------|
 | `--ctfd-url URL` | URL/domaine de votre serveur CTFd | ✅ Oui |
 | `--working-folder DIR` | Répertoire de travail (défaut: `/home/$USER`) | ❌ Non |
-| `--theme` | Active l'utilisation d'un thème personnalisé | ❌ Non |
+| `--theme DIR/URL` | Active l'utilisation d'un thème personnalisé | ❌ Non |
 | `--backup-schedule TYPE` | Fréquence de sauvegarde de la base de données (`daily` (défaut), `hourly`, `10min`) | ❌ Non |
 | `--help` | Affiche l'aide | ❌ Non |
 
