@@ -18,7 +18,7 @@ declare -A CONFIG=(
     [GENERATE_CERTS]="true"
     [CONFIGURE_DOCKER]="true"
     [WORKING_DIR]="/home/${SUDO_USER:-$USER}"
-    [THEME]="false"
+    [THEME]=""
     [BACKUP_SCHEDULE]="daily"
     [JWT_SECRET_KEY]=""
     [DOCKER_ENV_FILE]="env.production"
@@ -68,6 +68,15 @@ is_ip_address() {
     return 1
 }
 
+is_git_url() {
+    local input="$1"
+    # Check if input looks like a git URL
+    if [[ $input =~ ^(https?|git|ssh):// ]] || [[ $input =~ \.git$ ]] || [[ $input =~ ^git@ ]]; then
+        return 0
+    fi
+    return 1
+}
+
 setup_env_key() {
     local key="$1"
     local value="$2"
@@ -96,7 +105,10 @@ Options:
     --ctfd-url URL          Set CTFd URL (mandatory)
                             Note: IP addresses automatically enable --no-https
     --working-folder DIR    Set working directory (default: /home/\$USER)
-    --theme                 Enable custom theme (default: false)
+    --theme PATH_OR_URL     Path to local theme folder or Git URL to clone
+                            Examples:
+                              --theme /path/to/my-theme
+                              --theme https://github.com/user/ctfd-theme.git
     --backup-schedule TYPE  Set backup schedule: daily, hourly, or 10min (default: daily)
     --help                  Show this help message
     --instancer-url         Set instancer URL (default: local instancer)
@@ -107,7 +119,8 @@ Examples:
     $SCRIPT_NAME --ctfd-url example.com
     $SCRIPT_NAME --ctfd-url 192.168.1.100  # Automatically uses --no-https
     $SCRIPT_NAME --ctfd-url example.com --working-folder /opt/ctfd
-    $SCRIPT_NAME --ctfd-url example.com --theme
+    $SCRIPT_NAME --ctfd-url example.com --theme /home/user/my-custom-theme
+    $SCRIPT_NAME --ctfd-url example.com --theme https://github.com/user/theme.git
     $SCRIPT_NAME --ctfd-url example.com --backup-schedule hourly
     $SCRIPT_NAME --ctfd-url example.com --instancer-url http://instancer.example.com:1234
 EOF
@@ -127,8 +140,9 @@ parse_arguments() {
                 shift 2
                 ;;
             --theme)
-                CONFIG[THEME]="true"
-                shift
+                [[ -n ${2:-} ]] || error_exit "Missing value for --theme (provide path or git URL)"
+                CONFIG[THEME]="$2"
+                shift 2
                 ;;
             --backup-schedule)
                 [[ -n ${2:-} ]] || error_exit "Missing value for --backup-schedule"
@@ -242,6 +256,7 @@ update_system() {
 
     apt update -qq
     apt upgrade -y -qq
+
     DEBIAN_FRONTEND=noninteractive apt install -qq -y \
         apt-transport-https \
         ca-certificates \
@@ -299,14 +314,12 @@ create_and_set_owner() {
     local working_dir="${CONFIG[WORKING_DIR]}"
     local upload_folder="$working_dir/data/CTFd/uploads"
     local log_folder="$working_dir/data/CTFd/logs"
-    local themes_folder="$working_dir/data/CTFd/themes"
 
     log_info "Creating necessary directories and setting ownership..."
 
     # Create directories
     mkdir -p "$upload_folder"
     mkdir -p "$log_folder"
-    mkdir -p "$themes_folder"
     mkdir -p "$working_dir/data/galvanize/challenges"
     mkdir -p "$working_dir/data/galvanize/playbooks"
 
@@ -316,7 +329,6 @@ create_and_set_owner() {
     # Change ownership to 1001
     chown -R 1001:1001 "$upload_folder"
     chown -R 1001:1001 "$log_folder"
-    chown -R 1001:1001 "$themes_folder"
 
     log_success "Directories created and ownership set successfully"
 }
@@ -325,62 +337,69 @@ create_and_set_owner() {
 # Theme Management
 # ============================================================================
 
-copy_themes() {
+setup_custom_theme() {
+    local theme_source="${CONFIG[THEME]}"
     local working_dir="${CONFIG[WORKING_DIR]}"
-    local infra_dir="$working_dir/infra"
-    local themes_dir="$working_dir/data/CTFd/themes"
+    local custom_theme_dir="$working_dir/data/CTFd/themes/custom"
     
-    log_info "Setting up custom themes..."
-    mkdir -p "$themes_dir"
-    
-    local has_errors=false
-    
-    # Copy admin theme
-    if [[ -d "$infra_dir/admin" ]]; then
-        log_info "Copying admin theme..."
-        if cp -r "$infra_dir/admin" "$themes_dir/admin"; then
-            log_success "admin theme copied successfully"
-        else
-            log_error "Failed to copy admin theme"
-            has_errors=true
-        fi
-    else
-        log_warning "admin theme not found at: $infra_dir/admin"
-        has_errors=true
-    fi
-    
-    # Copy core theme
-    if [[ -d "$infra_dir/core" ]]; then
-        log_info "Copying core theme..."
-        if cp -r "$infra_dir/core" "$themes_dir/core"; then
-            log_success "core theme copied successfully"
-        else
-            log_error "Failed to copy core theme"
-            has_errors=true
-        fi
-    else
-        log_warning "core theme not found at: $infra_dir/core"
-        has_errors=true
-    fi
-    
-    # Create custom theme from core
-    if [[ -d "$infra_dir/core" ]]; then
-        log_info "Copying core theme as custom theme..."
-        if cp -r "$infra_dir/core" "$themes_dir/custom"; then
-            log_success "Custom theme created successfully"
-        else
-            log_error "Failed to create custom theme"
-            has_errors=true
-        fi
-    fi
-    
-    if $has_errors; then
-        log_warning "Themes setup completed with some warnings/errors"
-        return 1
-    else
-        log_success "Themes setup completed successfully"
+    if [[ -z "$theme_source" ]]; then
+        log_info "No custom theme specified"
         return 0
     fi
+    
+    log_info "Setting up custom theme from: $theme_source"
+    
+    # Clean up any existing custom theme directory
+    if [[ -d "$custom_theme_dir" ]]; then
+        log_info "Removing existing custom theme directory..."
+        rm -rf "$custom_theme_dir"
+    fi
+    
+    mkdir -p "$custom_theme_dir"
+    
+    if is_git_url "$theme_source"; then
+        # Clone the git repository
+        log_info "Detected git URL, cloning repository..."
+        local clone_dir="$working_dir/theme-clone-temp"
+        
+        # Clean up any existing clone directory
+        if [[ -d "$clone_dir" ]]; then
+            rm -rf "$clone_dir"
+        fi
+        
+        if git clone "$theme_source" "$clone_dir"; then
+            log_success "Repository cloned successfully"
+            
+            # Copy the contents to the custom theme directory
+            cp -r "$clone_dir"/* "$custom_theme_dir"/
+            
+            # Clean up clone directory
+            rm -rf "$clone_dir"
+        else
+            log_error "Failed to clone git repository: $theme_source"
+            return 1
+        fi
+    else
+        # Use local folder
+        if [[ ! -d "$theme_source" ]]; then
+            log_error "Theme directory not found: $theme_source"
+            return 1
+        fi
+        
+        log_info "Copying local theme directory..."
+        if cp -r "$theme_source"/* "$custom_theme_dir"/; then
+            log_success "Local theme copied successfully"
+        else
+            log_error "Failed to copy local theme"
+            return 1
+        fi
+    fi
+    
+    # Set proper ownership
+    chown -R 1001:1001 "$custom_theme_dir"
+    
+    log_success "Custom theme setup completed at: $custom_theme_dir"
+    return 0
 }
 
 # ============================================================================
@@ -475,15 +494,15 @@ install_ctfd() {
     docker compose -f "$compose_file" pull -q
     log_success "Docker images successfully pulled"
 
-    if [[ "${CONFIG[THEME]}" == "true" ]]; then
+    if [[ -n "${CONFIG[THEME]}" ]]; then
         log_info "Custom theme option enabled"
         
-        if copy_themes; then
-            sed -i '/#.*themes:/s/^#//' "$compose_file"
-            log_success "Theme volume mount enabled in docker-compose.yml"
+        if setup_custom_theme; then
+            sed -i '/#.*themes\/custom:/s/^#//' "$compose_file"
+            log_success "Custom theme volume mount enabled in docker-compose.yml"
         else
-            log_warning "Theme copy failed, but continuing with setup"
-            log_warning "You may need to manually copy themes later"
+            log_warning "Theme setup failed, but continuing with setup"
+            log_warning "You may need to manually configure the theme later"
         fi
     fi
 
