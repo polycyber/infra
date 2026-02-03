@@ -62,10 +62,11 @@ Bash script for building, ingesting, and synchronizing CTF challenges with suppo
 
 | Option | Description | Required |
 |--------|-------------|-------------|
-| `--ctfd-url URL` | URL/domain of your CTFd server | ✅ Yes |
+| `--ctfd-url URL/IP` | URL/domain of your CTFd server | ✅ Yes |
 | `--working-folder DIR` | Working directory (default: `/home/$USER`) | ❌ No |
 | `--theme DIR/URL` | Enables the use of a personalised theme | ❌ No |
 | `--backup-schedule TYPE` | Database backup frequency (`daily` (default), `hourly`, `10min`) | ❌ No |
+| `--no-https` | Deployment without HTTPS | ❌ No |
 | `--help` | Display help | ❌ No |
 
 #### Installation Examples
@@ -73,6 +74,9 @@ Bash script for building, ingesting, and synchronizing CTF challenges with suppo
 ```bash
 # Basic installation with domain
 ./setup.sh --ctfd-url example.com
+
+# Basic installation with domain - automatically uses the --no-https option
+./setup.sh --ctfd-url 192.168.12.34
 
 # Installation with custom directory
 ./setup.sh --ctfd-url example.com --working-folder /opt/ctfd

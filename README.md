@@ -63,10 +63,11 @@ Script Bash avancé pour la construction, l'ingestion et la synchronisation des 
 
 | Option | Description | Obligatoire |
 |--------|-------------|-------------|
-| `--ctfd-url URL` | URL/domaine de votre serveur CTFd | ✅ Oui |
+| `--ctfd-url URL/IP` | URL/domaine de votre serveur CTFd | ✅ Oui |
 | `--working-folder DIR` | Répertoire de travail (défaut: `/home/$USER`) | ❌ Non |
 | `--theme DIR/URL` | Active l'utilisation d'un thème personnalisé | ❌ Non |
 | `--backup-schedule TYPE` | Fréquence de sauvegarde de la base de données (`daily` (défaut), `hourly`, `10min`) | ❌ Non |
+| `--no-https` | Déploiement sans HTTPS | ❌ Non |
 | `--help` | Affiche l'aide | ❌ Non |
 
 #### Exemples d'installation
@@ -74,6 +75,9 @@ Script Bash avancé pour la construction, l'ingestion et la synchronisation des 
 ```bash
 # Installation basique avec domaine
 ./setup.sh --ctfd-url exemple.com
+
+# Installation basique avec IP - utilise l'option --no-https automatiquement
+./setup.sh --ctfd-url 192.168.12.34
 
 # Installation avec répertoire personnalisé
 ./setup.sh --ctfd-url exemple.com --working-folder /opt/ctfd

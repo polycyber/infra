@@ -110,10 +110,10 @@ Options:
                               --theme /path/to/my-theme
                               --theme https://github.com/user/ctfd-theme.git
     --backup-schedule TYPE  Set backup schedule: daily, hourly, or 10min (default: daily)
-    --help                  Show this help message
     --instancer-url         Set instancer URL (default: local instancer)
     --no-https              Disable HTTPS configuration for CTFd
                             (automatically enabled for IP addresses)
+    --help                  Show this help message
 
 Examples:
     $SCRIPT_NAME --ctfd-url example.com
