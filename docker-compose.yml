@@ -43,7 +43,7 @@ services:
       - internal
 
   traefik:
-    image: traefik:2.11
+    image: traefik:latest
     container_name: traefik
     restart: unless-stopped
     command:

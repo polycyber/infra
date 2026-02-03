@@ -11,42 +11,8 @@ readonly YELLOW='\033[1;33m'
 readonly BLUE='\033[0;34m'
 readonly NC='\033[0m' # No Color
 
-log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
-log_success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
-log_warning() { echo -e "${YELLOW}[WARNING]${NC} $*"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
-
-error_exit() {
-    log_error "$1"
-    exit "${2:-1}"
-}
-
-ensure_root() {
-    if [[ $EUID -ne 0 ]]; then
-        log_info "This script must be run as root. Re-executing with sudo..."
-        exec sudo bash "$0" "$@"
-    fi
-    log_info "Running script as root..."
-}
-
-identify_os() {
-    if [ -f /etc/os-release ]; then
-        . /etc/os-release
-        case $ID in
-            ubuntu)
-                echo "ubuntu"
-                ;;
-            debian)
-                echo "debian"
-                ;;
-            *)
-                error_exit "Unsupported OS: $ID. Please check the official Docker documentation before running the setup again."
-                ;;
-        esac
-    else
-        error_exit "Unable to identify the OS. Please check the official Docker documentation before running the setup again."
-    fi
-}
+readonly DOCKER_PLUGIN_REPO="https://github.com/28Pollux28/zync"
+readonly DOCKER_INSTANCER_REPO="https://github.com/28Pollux28/galvanize"
 
 declare -A CONFIG=(
     [GENERATE_CERTS]="true"
@@ -58,8 +24,69 @@ declare -A CONFIG=(
     [DOCKER_ENV_FILE]="env.production"
 )
 
-readonly DOCKER_PLUGIN_REPO="https://github.com/28Pollux28/zync"
-readonly DOCKER_INSTANCER_REPO="https://github.com/28Pollux28/galvanize"
+# ============================================================================
+# Logging and Error Handling
+# ============================================================================
+
+log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
+log_success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
+log_warning() { echo -e "${YELLOW}[WARNING]${NC} $*"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
+
+error_exit() {
+    log_error "$1"
+    exit "${2:-1}"
+}
+
+# ============================================================================
+# Utility Functions
+# ============================================================================
+
+generate_password() {
+    local length="${1:-15}"
+    openssl rand -base64 "$((length * 3 / 4))" | tr -d '+/=' | head -c "$length"
+}
+
+is_ip_address() {
+    local input="$1"
+    
+    if [[ $input =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+        local IFS='.'
+        local -a octets=($input)
+        for octet in "${octets[@]}"; do
+            if ((octet > 255)); then
+                return 1
+            fi
+        done
+        return 0
+    fi
+    
+    if [[ $input =~ : ]]; then
+        return 0
+    fi
+    
+    return 1
+}
+
+setup_env_key() {
+    local key="$1"
+    local value="$2"
+    local env_file="${CONFIG[WORKING_DIR]}/infra/.env"
+    
+    if [[ ! -f "$env_file" ]]; then
+        cp "${CONFIG[WORKING_DIR]}/infra/${CONFIG[DOCKER_ENV_FILE]}" "$env_file"
+    fi
+    
+    if grep -q "^${key}=" "$env_file"; then
+        sed -i "s|^${key}=.*|${key}=${value}|" "$env_file"
+    else
+        echo "${key}=${value}" >> "$env_file"
+    fi
+}
+
+# ============================================================================
+# Argument Parsing and Validation
+# ============================================================================
 
 show_usage() {
     cat << EOF
@@ -144,47 +171,40 @@ parse_arguments() {
     fi
 }
 
-is_ip_address() {
-    local input="$1"
-    
-    if [[ $input =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
-        local IFS='.'
-        local -a octets=($input)
-        for octet in "${octets[@]}"; do
-            if ((octet > 255)); then
-                return 1
-            fi
-        done
-        return 0
+# ============================================================================
+# System Initialization
+# ============================================================================
+
+ensure_root() {
+    if [[ $EUID -ne 0 ]]; then
+        log_info "This script must be run as root. Re-executing with sudo..."
+        exec sudo bash "$0" "$@"
     fi
-    
-    if [[ $input =~ : ]]; then
-        return 0
-    fi
-    
-    return 1
+    log_info "Running script as root..."
 }
 
-generate_password() {
-    local length="${1:-15}"
-    openssl rand -base64 "$((length * 3 / 4))" | tr -d '+/=' | head -c "$length"
-}
-
-setup_env_key() {
-    local key="$1"
-    local value="$2"
-    local env_file="${CONFIG[WORKING_DIR]}/infra/.env"
-    
-    if [[ ! -f "$env_file" ]]; then
-        cp "${CONFIG[WORKING_DIR]}/infra/${CONFIG[DOCKER_ENV_FILE]}" "$env_file"
-    fi
-    
-    if grep -q "^${key}=" "$env_file"; then
-        sed -i "s|^${key}=.*|${key}=${value}|" "$env_file"
+identify_os() {
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        case $ID in
+            ubuntu)
+                echo "ubuntu"
+                ;;
+            debian)
+                echo "debian"
+                ;;
+            *)
+                error_exit "Unsupported OS: $ID. Please check the official Docker documentation before running the setup again."
+                ;;
+        esac
     else
-        echo "${key}=${value}" >> "$env_file"
+        error_exit "Unable to identify the OS. Please check the official Docker documentation before running the setup again."
     fi
 }
+
+# ============================================================================
+# System Package Installation
+# ============================================================================
 
 install_python_venv() {
     local python_version
@@ -195,7 +215,7 @@ install_python_venv() {
     log_info "Installing $venv_package..."
 
     # Try to install the version-specific venv package
-    if apt-get install -qq -y "$venv_package" 2>/dev/null; then
+    if apt install -qq -y "$venv_package" 2>/dev/null; then
         log_success "Successfully installed $venv_package"
         return 0
     fi
@@ -207,7 +227,7 @@ install_python_venv() {
 
     for alt in "${alternatives[@]}"; do
         log_info "Trying $alt..."
-        if apt-get install -qq -y "$alt" 2>/dev/null; then
+        if apt install -qq -y "$alt" 2>/dev/null; then
             log_success "Successfully installed $alt"
             return 0
         fi
@@ -220,9 +240,9 @@ update_system() {
     log_info "Updating system packages..."
     export DEBIAN_FRONTEND=noninteractive
 
-    apt-get update -qq
-    apt-get upgrade -y -qq
-    DEBIAN_FRONTEND=noninteractive apt-get install -qq -y \
+    apt update -qq
+    apt upgrade -y -qq
+    DEBIAN_FRONTEND=noninteractive apt install -qq -y \
         apt-transport-https \
         ca-certificates \
         curl \
@@ -234,10 +254,14 @@ update_system() {
         wget \
         pipx
 
-    install_python_venv
+    # install_python_venv
 
     log_success "System packages updated"
 }
+
+# ============================================================================
+# Docker Installation
+# ============================================================================
 
 install_docker() {
     if command -v docker >/dev/null 2>&1; then
@@ -253,53 +277,247 @@ install_docker() {
     curl -fsSL "https://download.docker.com/linux/${DISTRO}/gpg" | \
         gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
 
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] \
-          https://download.docker.com/linux/${DISTRO} $(lsb_release -cs) stable" | \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/${DISTRO} $(lsb_release -cs) stable" | \
         tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-    apt-get update -qq
-    apt-get install -qq -y \
-        docker-ce \
-        docker-ce-cli \
-        containerd.io \
-        docker-buildx-plugin \
-        docker-compose-plugin
+    apt update -qq
+    apt install -qq -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 
-    if command -v docker >/dev/null 2>&1; then
-        log_success "Docker installed successfully"
-        setup_docker_group
+    if [[ -n "${SUDO_USER:-}" ]]; then
+        usermod -aG docker "$SUDO_USER"
+        log_info "Added $SUDO_USER to docker group"
+    fi
+
+    log_success "Docker installed successfully"
+}
+
+# ============================================================================
+# Directory Setup
+# ============================================================================
+
+create_and_set_owner() {
+    local working_dir="${CONFIG[WORKING_DIR]}"
+    local upload_folder="$working_dir/data/CTFd/uploads"
+    local log_folder="$working_dir/data/CTFd/logs"
+    local themes_folder="$working_dir/data/CTFd/themes"
+
+    log_info "Creating necessary directories and setting ownership..."
+
+    # Create directories
+    mkdir -p "$upload_folder"
+    mkdir -p "$log_folder"
+    mkdir -p "$themes_folder"
+    mkdir -p "$working_dir/data/galvanize/challenges"
+    mkdir -p "$working_dir/data/galvanize/playbooks"
+
+
+    chown -R "${SUDO_USER:-$USER}:${SUDO_USER:-$USER}" "$working_dir/data"
+
+    # Change ownership to 1001
+    chown -R 1001:1001 "$upload_folder"
+    chown -R 1001:1001 "$log_folder"
+    chown -R 1001:1001 "$themes_folder"
+
+    log_success "Directories created and ownership set successfully"
+}
+
+# ============================================================================
+# Theme Management
+# ============================================================================
+
+copy_themes() {
+    local working_dir="${CONFIG[WORKING_DIR]}"
+    local infra_dir="$working_dir/infra"
+    local themes_dir="$working_dir/data/CTFd/themes"
+    
+    log_info "Setting up custom themes..."
+    mkdir -p "$themes_dir"
+    
+    local has_errors=false
+    
+    # Copy admin theme
+    if [[ -d "$infra_dir/admin" ]]; then
+        log_info "Copying admin theme..."
+        if cp -r "$infra_dir/admin" "$themes_dir/admin"; then
+            log_success "admin theme copied successfully"
+        else
+            log_error "Failed to copy admin theme"
+            has_errors=true
+        fi
     else
-        error_exit "Docker installation failed"
+        log_warning "admin theme not found at: $infra_dir/admin"
+        has_errors=true
+    fi
+    
+    # Copy core theme
+    if [[ -d "$infra_dir/core" ]]; then
+        log_info "Copying core theme..."
+        if cp -r "$infra_dir/core" "$themes_dir/core"; then
+            log_success "core theme copied successfully"
+        else
+            log_error "Failed to copy core theme"
+            has_errors=true
+        fi
+    else
+        log_warning "core theme not found at: $infra_dir/core"
+        has_errors=true
+    fi
+    
+    # Create custom theme from core
+    if [[ -d "$infra_dir/core" ]]; then
+        log_info "Copying core theme as custom theme..."
+        if cp -r "$infra_dir/core" "$themes_dir/custom"; then
+            log_success "Custom theme created successfully"
+        else
+            log_error "Failed to create custom theme"
+            has_errors=true
+        fi
+    fi
+    
+    if $has_errors; then
+        log_warning "Themes setup completed with some warnings/errors"
+        return 1
+    else
+        log_success "Themes setup completed successfully"
+        return 0
     fi
 }
 
-setup_docker_group() {
-    log_info "Setting up Docker group..."
+# ============================================================================
+# CTFd Installation
+# ============================================================================
 
-    if ! getent group docker >/dev/null; then
-        groupadd docker
+install_ctfd() {
+    local working_dir="${CONFIG[WORKING_DIR]}"
+    local plugin_name="zync"
+    local plugin_path="$working_dir/$plugin_name"
+    local compose_file="$working_dir/infra/docker-compose.yml"
+
+    log_info "Installing CTFd..."
+
+    if [[ ! -d $plugin_path ]]; then
+        log_info "Cloning zync instancer plugin..."
+        git -C "$working_dir" clone "$DOCKER_PLUGIN_REPO"
+    else
+        log_info "Zync plugin already exists, updating..."
+        git -C "$plugin_path" pull
+    fi    
+    log_success "Instancer plugin configuration complete"
+
+    if [[ "${CONFIG[INSTANCER_URL]:-}" == "" ]]; then
+        local instancer_path="$working_dir/galvanize"
+        local cert_dir="${CONFIG[WORKING_DIR]}/cert"
+        local PRIVATE_KEY_PATH="$cert_dir/galvanize-instancer-key"
+        local PUBLIC_KEY_PATH="${PRIVATE_KEY_PATH}.pub"
+        local CONFIG_PATH="$working_dir/data/galvanize/config.yaml"
+        log_info "Setting up local instancer..."
+
+        if [[ ! -d $instancer_path ]]; then
+            log_info "Cloning galvanize instancer..."
+            git -C "$working_dir" clone "$DOCKER_INSTANCER_REPO"
+        else
+            log_info "Instancer already exists, updating..."
+            git -C "$instancer_path" pull
+        fi
+        cp "$instancer_path/config.example.yaml" "$CONFIG_PATH"
+
+        mkdir -p "$cert_dir"         
+
+        ssh-keygen -t rsa -b 4096 -f "$PRIVATE_KEY_PATH" -N "" -q
+        chmod 600 "$PRIVATE_KEY_PATH"
+        chown "${SUDO_USER:-$USER}:${SUDO_USER:-$USER}" "$PRIVATE_KEY_PATH"
+
+        chmod 644 "$PUBLIC_KEY_PATH"
+
+        cat "$PUBLIC_KEY_PATH" >> "/home/${SUDO_USER:-$USER}/.ssh/authorized_keys"
+
+        setup_env_key GALVANIZE_REPO_PATH "$instancer_path"
+        setup_env_key GALVANIZE_CONFIG_PATH "$CONFIG_PATH"
+        setup_env_key SSH_KEY_PATH "$PRIVATE_KEY_PATH"
+        mkdir -p "$working_dir/data/galvanize"
+        cp -a "$instancer_path/data/." "$working_dir/data/galvanize"
+        chown -R "${SUDO_USER:-$USER}:${SUDO_USER:-$USER}" "$working_dir/data/galvanize"
     fi
 
-    local user="${SUDO_USER:-$USER}"
-    usermod -aG docker "$user"
 
-    log_warning "User '$user' added to docker group"
-    log_warning "You may need to log out and back in for group changes to take effect"
-}
+    # Configure plugin access in DB --> add JWT key + instancer URL
 
-install_pipx() {
-    log_info "Installing pipx..."
-    local pipx_version
-    pipx_version=$(pipx --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1 || echo "")
-
-    if [[ $pipx_version != "1.7" ]]; then
-        su - $SUDO_USER -c "python3 -m pip install --user --break-system-packages pipx"
-        su - $SUDO_USER -c "python3 -m pipx ensurepath"
-        # Manually add pipx to PATH for the specific user
-        su - $SUDO_USER -c "echo 'export PATH=\$PATH:\$HOME/.local/bin' >> ~/.bashrc"
+    if [[ -f $compose_file ]]; then
+        cp "$compose_file" "$compose_file.backup"
     fi
-    log_success "pipx installed and configured"
+
+    log_info "Generating secure secrets..."
+
+    local secret_key
+    local db_password
+    local db_root_password
+    local jwt_secret_key
+
+    secret_key=$(generate_password 32)
+    db_password=$(generate_password 16)
+    db_root_password=$(generate_password 16)
+    jwt_secret_key=$(generate_password 48)
+    CONFIG[JWT_SECRET_KEY]="$jwt_secret_key"
+
+    log_info "Updating configuration with new secrets..."
+
+    setup_env_key SECRET_KEY "$secret_key"
+    setup_env_key MARIADB_PASSWORD "$db_password"
+    setup_env_key MARIADB_ROOT_PASSWORD "$db_root_password"
+
+    log_info "Configuration updated with new secrets"
+    setup_env_key BASE_DOMAIN "${CONFIG[CTFD_URL]}"
+
+    log_info "Pulling and building necessary docker images..."
+    log_info "Building docker images... This may take a while"
+    docker compose -f "$compose_file" build
+    log_success "Docker images successfully built"
+    docker compose -f "$compose_file" pull -q
+    log_success "Docker images successfully pulled"
+
+    if [[ "${CONFIG[THEME]}" == "true" ]]; then
+        log_info "Custom theme option enabled"
+        
+        if copy_themes; then
+            sed -i '/#.*themes:/s/^#//' "$compose_file"
+            log_success "Theme volume mount enabled in docker-compose.yml"
+        else
+            log_warning "Theme copy failed, but continuing with setup"
+            log_warning "You may need to manually copy themes later"
+        fi
+    fi
+
+    log_info "To start the CTFd containers, please run the following command in a properly configured session:"
+    echo -e "\tdocker compose -f "$compose_file" up -d"
+
+    log_success "CTFd installation complete!"
+
+    log_info "Generated secrets:"
+    log_info "  Secret Key: $secret_key"
+    log_info "  DB Password: $db_password"
+    log_info "  DB Root Password: $db_root_password"
 }
+
+# ============================================================================
+# Instancer Configuration
+# ============================================================================
+
+configure_instancer() {
+    local working_dir="${CONFIG[WORKING_DIR]}"
+    local instancer_path="$working_dir/galvanize"
+    local CONFIG_PATH="$working_dir/data/galvanize/config.yaml"
+
+    sed -i "s|your-secret-key-here|${CONFIG[JWT_SECRET_KEY]}|g" "$CONFIG_PATH"
+    sed -i "s|your-ssh-user|"${SUDO_USER:-$USER}"|g" "$CONFIG_PATH"
+    sed -i "s|your-server-ip,|${CONFIG[CTFD_URL]},|g" "$CONFIG_PATH"
+    sed -i "s|challs.example.com|${CONFIG[CTFD_URL]}|g" "$CONFIG_PATH"
+
+    log_success "Local instancer setup complete"
+}
+
+# ============================================================================
+# Backup System
+# ============================================================================
 
 setup_backup_script() {
     local working_dir="${CONFIG[WORKING_DIR]}"
@@ -381,218 +599,9 @@ setup_backup_cron() {
     log_info "Backup logs will be written to: $cron_log"
 }
 
-copy_themes() {
-    local working_dir="${CONFIG[WORKING_DIR]}"
-    local infra_dir="$working_dir/infra"
-    local themes_dir="$working_dir/data/CTFd/themes"
-    
-    log_info "Setting up custom themes..."
-    mkdir -p "$themes_dir"
-    
-    local has_errors=false
-    
-    # Copy admin theme
-    if [[ -d "$infra_dir/admin" ]]; then
-        log_info "Copying admin theme..."
-        if cp -r "$infra_dir/admin" "$themes_dir/admin"; then
-            log_success "admin theme copied successfully"
-        else
-            log_error "Failed to copy admin theme"
-            has_errors=true
-        fi
-    else
-        log_warning "admin theme not found at: $infra_dir/admin"
-        has_errors=true
-    fi
-    
-    # Copy core theme
-    if [[ -d "$infra_dir/core" ]]; then
-        log_info "Copying core theme..."
-        if cp -r "$infra_dir/core" "$themes_dir/core"; then
-            log_success "core theme copied successfully"
-        else
-            log_error "Failed to copy core theme"
-            has_errors=true
-        fi
-    else
-        log_warning "core theme not found at: $infra_dir/core"
-        has_errors=true
-    fi
-    
-    # Create custom theme from core
-    if [[ -d "$infra_dir/core" ]]; then
-        log_info "Copying core theme as custom theme..."
-        if cp -r "$infra_dir/core" "$themes_dir/custom"; then
-            log_success "Custom theme created successfully"
-        else
-            log_error "Failed to create custom theme"
-            has_errors=true
-        fi
-    fi
-    
-    if $has_errors; then
-        log_warning "Themes setup completed with some warnings/errors"
-        return 1
-    else
-        log_success "Themes setup completed successfully"
-        return 0
-    fi
-}
-
-install_ctfd() {
-    local working_dir="${CONFIG[WORKING_DIR]}"
-    local plugin_name="zync"
-    local plugin_path="$working_dir/$plugin_name"
-    local compose_file="$working_dir/infra/docker-compose.yml"
-
-    log_info "Installing CTFd..."
-
-    if [[ ! -d $plugin_path ]]; then
-        log_info "Cloning zync instancer plugin..."
-        git -C "$working_dir" clone "$DOCKER_PLUGIN_REPO"
-    else
-        log_info "Zync plugin already exists, updating..."
-        git -C "$plugin_path" pull
-    fi    
-    log_success "Instancer plugin configuration complete"
-
-    if [[ "${CONFIG[INSTANCER_URL]:-}" == "" ]]; then
-        local instancer_path="$working_dir/galvanize"
-        local cert_dir="${CONFIG[WORKING_DIR]}/cert"
-        local PRIVATE_KEY_PATH="$cert_dir/galvanize-instancer-key"
-        local PUBLIC_KEY_PATH="${PRIVATE_KEY_PATH}.pub"
-        local CONFIG_PATH="$working_dir/data/galvanize/config.yaml"
-        log_info "Setting up local instancer..."
-
-        if [[ ! -d $instancer_path ]]; then
-            log_info "Cloning galvanize instancer..."
-            git -C "$working_dir" clone "$DOCKER_INSTANCER_REPO"
-        else
-            log_info "Instancer already exists, updating..."
-            git -C "$instancer_path" pull
-        fi
-        cp "$instancer_path/config.example.yaml" "$CONFIG_PATH"
-
-        mkdir -p "$cert_dir"         
-
-        ssh-keygen -t rsa -b 4096 -f "$PRIVATE_KEY_PATH" -N "" -q
-        chmod 600 "$PRIVATE_KEY_PATH"
-        chown "${SUDO_USER:-$USER}:${SUDO_USER:-$USER}" "$PRIVATE_KEY_PATH"
-
-        chmod 644 "$PUBLIC_KEY_PATH"
-
-        cat "$PUBLIC_KEY_PATH" >> "/home/${SUDO_USER:-$USER}/.ssh/authorized_keys"
-
-        setup_env_key GALVANIZE_REPO_PATH "$instancer_path"
-        setup_env_key GALVANIZE_CONFIG_PATH "$CONFIG_PATH"
-        setup_env_key SSH_KEY_PATH "$PRIVATE_KEY_PATH"
-        mkdir -p "$working_dir/data/galvanize"
-        cp -a "$instancer_path/data/." "$working_dir/data/galvanize"
-        chown -R "${SUDO_USER:-$USER}:${SUDO_USER:-$USER}" "$working_dir/data/galvanize"
-    fi
-
-
-    # Configure plugin access in DB --> add JWT key + instancer URL
-
-    if [[ -f $compose_file ]]; then
-        cp "$compose_file" "$compose_file.backup"
-    fi
-
-    log_info "Generating secure secrets..."
-
-    local secret_key
-    local db_password
-    local db_root_password
-    local jwt_secret_key
-
-    secret_key=$(generate_password 32)
-    db_password=$(generate_password 16)
-    db_root_password=$(generate_password 16)
-    jwt_secret_key=$(generate_password 48)
-    CONFIG[JWT_SECRET_KEY]="$jwt_secret_key"
-
-    log_info "Updating configuration with new secrets..."
-
-    setup_env_key SECRET_KEY "$secret_key"
-    # sed -i "s/SECRET_KEY=.*/SECRET_KEY=$secret_key/" "$compose_file"
-
-    # sed -i "s/db_password/$db_password/g" "$compose_file"
-    setup_env_key MARIADB_PASSWORD "$db_password"
-    # sed -i "s/db_root_password/$db_root_password/g" "$compose_file"
-    setup_env_key MARIADB_ROOT_PASSWORD "$db_root_password"
-    log_info "Configuration updated with new secrets"
-
-    setup_env_key BASE_DOMAIN "${CONFIG[CTFD_URL]}"
-    # sed -i "s|BASE_DOMAIN=.*|BASE_DOMAIN=${CONFIG[CTFD_URL]}|" "$compose_file"
-
-    log_info "Pulling and building necessary docker images..."
-    log_info "Building docker images... This may take a while"
-    docker compose -f "$compose_file" build
-    log_success "Docker images successfully built"
-    docker compose -f "$compose_file" pull -q
-    log_success "Docker images successfully pulled"
-
-    if [[ "${CONFIG[THEME]}" == "true" ]]; then
-        log_info "Custom theme option enabled"
-        
-        if copy_themes; then
-            sed -i '/#.*themes:/s/^#//' "$compose_file"
-            log_success "Theme volume mount enabled in docker-compose.yml"
-        else
-            log_warning "Theme copy failed, but continuing with setup"
-            log_warning "You may need to manually copy themes later"
-        fi
-    fi
-
-    log_info "To start the CTFd containers, please run the following command in a properly configured session:"
-    echo -e "\tdocker compose -f "$compose_file" up -d"
-
-    log_success "CTFd installation complete!"
-
-    log_info "Generated secrets:"
-    log_info "  Secret Key: $secret_key"
-    log_info "  DB Password: $db_password"
-    log_info "  DB Root Password: $db_root_password"
-}
-
-configure_instancer() {
-    local working_dir="${CONFIG[WORKING_DIR]}"
-    local instancer_path="$working_dir/galvanize"
-    local CONFIG_PATH="$working_dir/data/galvanize/config.yaml"
-
-    sed -i "s|your-secret-key-here|${CONFIG[JWT_SECRET_KEY]}|g" "$CONFIG_PATH"
-    sed -i "s|your-ssh-user|"${SUDO_USER:-$USER}"|g" "$CONFIG_PATH"
-    sed -i "s|your-server-ip,|${CONFIG[CTFD_URL]},|g" "$CONFIG_PATH"
-    sed -i "s|challs.example.com|${CONFIG[CTFD_URL]}|g" "$CONFIG_PATH"
-
-    log_success "Local instancer setup complete"
-}
-
-create_and_set_owner() {
-    local working_dir="${CONFIG[WORKING_DIR]}"
-    local upload_folder="$working_dir/data/CTFd/uploads"
-    local log_folder="$working_dir/data/CTFd/logs"
-    local themes_folder="$working_dir/data/CTFd/themes"
-
-    log_info "Creating necessary directories and setting ownership..."
-
-    # Create directories
-    mkdir -p "$upload_folder"
-    mkdir -p "$log_folder"
-    mkdir -p "$themes_folder"
-    mkdir -p "$working_dir/data/galvanize/challenges"
-    mkdir -p "$working_dir/data/galvanize/playbooks"
-
-
-    chown -R "${SUDO_USER:-$USER}:${SUDO_USER:-$USER}" "$working_dir/data"
-
-    # Change ownership to 1001
-    chown -R 1001:1001 "$upload_folder"
-    chown -R 1001:1001 "$log_folder"
-    chown -R 1001:1001 "$themes_folder"
-
-    log_success "Directories created and ownership set successfully"
-}
+# ============================================================================
+# Main Execution
+# ============================================================================
 
 main() {
     log_info "Starting CTFd server setup..."
