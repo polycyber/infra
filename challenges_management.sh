@@ -4,7 +4,7 @@ set -euo pipefail  # Exit on error, undefined variables, and pipe failures
 
 readonly SCRIPT_NAME="$(basename "$0")"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-readonly VERSION="1.0.0"
+readonly VERSION="2.0.0"
 
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
@@ -266,8 +266,38 @@ check_dependencies() {
     log_success "All dependencies check passed"
 }
 
+ensure_ctfcli_available() {
+    export PATH="$HOME/.local/bin:$PATH"
+    if command -v ctf &> /dev/null || command -v ctfcli &> /dev/null; then
+        return 0
+    fi
+
+    log_debug "Attempting to make ctfcli available in current session..."
+    if [[ -f "$HOME/.bashrc" ]]; then
+        if grep -q "pipx" "$HOME/.bashrc" 2>/dev/null; then
+            eval "$(grep -A 2 'Created by .pipx' "$HOME/.bashrc" 2>/dev/null | grep export || true)"
+        fi
+    fi
+    if command -v ctf &> /dev/null || command -v ctfcli &> /dev/null; then
+        return 0
+    fi
+
+    if [[ -x "$HOME/.local/bin/ctfcli" ]]; then
+        log_info "Creating temporary command wrappers for this session..."
+        ctfcli() { "$HOME/.local/bin/ctfcli" "$@"; }
+        ctf() { "$HOME/.local/bin/ctfcli" "$@"; }
+        export -f ctfcli 2>/dev/null || true
+        export -f ctf 2>/dev/null || true
+        return 0
+    fi
+    
+    return 1
+}
+
 install_ctfcli() {
-    if ! command -v ctfcli &> /dev/null; then
+    export PATH="$HOME/.local/bin:$PATH"
+    
+    if ! command -v ctfcli &> /dev/null && ! command -v ctf &> /dev/null; then
         log_info "CTFcli is not installed. Installing CTFcli..."
         if [[ "${CONFIG[DRY_RUN]}" == "false" ]]; then
             # Check if pipx is available
@@ -279,17 +309,22 @@ install_ctfcli() {
             local install_output
             if install_output=$(pipx install ctfcli 2>&1); then
                 log_success "CTFcli installed successfully"
+                pipx ensurepath --force > /dev/null 2>&1 || true
+                export PATH="$HOME/.local/bin:$PATH"
             elif echo "$install_output" | grep -q "already seems to be installed"; then
                 log_info "CTFcli is already installed via pipx"
-                # Ensure it's in PATH
-                if ! command -v ctfcli &> /dev/null; then
-                    log_warning "CTFcli is installed but not in PATH. You may need to run: pipx ensurepath"
+                if ! ensure_ctfcli_available; then
+                    log_warning "CTFcli is installed but not accessible in current shell"
+                    log_info "Please restart your shell or run: source ~/.bashrc"
+                    log_info "Alternatively, add this to your shell config: export PATH=\"\$HOME/.local/bin:\$PATH\""
                     error_exit "CTFcli installation found but not accessible"
                 fi
             else
                 log_error "Failed to install CTFcli: $install_output"
                 error_exit "CTFcli installation failed"
             fi
+            
+            ensure_ctfcli_available
         else
             echo "Would install: pipx install ctfcli"
         fi
@@ -297,7 +332,13 @@ install_ctfcli() {
         log_success "CTFcli is already installed and available"
         # Check version
         local version
-        version=$(ctfcli --version 2>/dev/null | head -n1 || echo "unknown")
+        if command -v ctfcli &> /dev/null; then
+            version=$(ctfcli --version 2>/dev/null | head -n1 || echo "unknown")
+        elif command -v ctf &> /dev/null; then
+            version=$(ctf --version 2>/dev/null | head -n1 || echo "unknown")
+        else
+            version="unknown"
+        fi
         log_debug "CTFcli version: $version"
     fi
 }
@@ -362,7 +403,27 @@ get_challenge_info() {
         "name")
             grep '^name:' "$challenge_yml" 2>/dev/null | sed -E 's/^name:[[:space:]]*//' | tr -d '"'
             ;;
+        "requirements")
+            # Extract requirements field - supports both single value and list format
+            # Format: requirements: challenge-name
+            # Or:     requirements: [challenge1, challenge2]
+            local req_line
+            req_line=$(grep '^requirements:' "$challenge_yml" 2>/dev/null | sed -E 's/^requirements:[[:space:]]*//')
+            if [[ -n "$req_line" ]]; then
+                # Remove brackets and quotes, split by comma
+                echo "$req_line" | tr -d '[]"' | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$'
+            fi
+            ;;
     esac
+}
+
+get_challenge_requirements() {
+    local challenge_path="$1"
+    local challenge_yml="$challenge_path/challenge.yml"
+    
+    [[ -f "$challenge_yml" ]] || return 0
+    
+    get_challenge_info "$challenge_yml" "requirements"
 }
 
 deploy_single_compose() {
@@ -662,10 +723,17 @@ build_challenges() {
 }
 
 initialize_ctfcli() {
+    ensure_ctfcli_available
+    
     if [[ ! -f "${CONFIG[WORKING_DIR]}/.ctf/config" ]]; then
         log_info "CTFcli is not initialized. Initializing CTFcli..."
         if [[ "${CONFIG[DRY_RUN]}" == "false" ]]; then
-            if ctf init; then
+            local init_cmd="ctf"
+            if ! command -v ctf &> /dev/null; then
+                init_cmd="ctfcli"
+            fi
+            
+            if $init_cmd init; then
                 log_success "CTFcli initialized successfully"
             else
                 error_exit "Failed to initialize CTFcli"
@@ -678,6 +746,90 @@ initialize_ctfcli() {
     fi
 }
 
+topological_sort_challenges() {
+    local -n challenges_array=$1
+    local -n requirements_map=$2
+    local -n sorted_result=$3
+    
+    declare -A in_degree
+    declare -A adjacency_list
+    local queue=()
+    
+    for challenge_path in "${challenges_array[@]}"; do
+        local challenge_name
+        challenge_name=$(basename "$challenge_path")
+        in_degree["$challenge_name"]=0
+    done
+    
+    for challenge_path in "${challenges_array[@]}"; do
+        local challenge_name
+        challenge_name=$(basename "$challenge_path")
+        
+        if [[ -n "${requirements_map[$challenge_name]:-}" ]]; then
+            while IFS= read -r req; do
+                [[ -z "$req" ]] && continue
+                
+                if [[ -z "${adjacency_list[$req]:-}" ]]; then
+                    adjacency_list["$req"]="$challenge_name"
+                else
+                    adjacency_list["$req"]="${adjacency_list[$req]} $challenge_name"
+                fi
+                
+                in_degree["$challenge_name"]=$((${in_degree[$challenge_name]:-0} + 1))
+            done <<< "${requirements_map[$challenge_name]}"
+        fi
+    done
+    
+    for challenge_path in "${challenges_array[@]}"; do
+        local challenge_name
+        challenge_name=$(basename "$challenge_path")
+        
+        if [[ ${in_degree[$challenge_name]:-0} -eq 0 ]]; then
+            queue+=("$challenge_path")
+        fi
+    done
+    
+    while [[ ${#queue[@]} -gt 0 ]]; do
+        local current_path="${queue[0]}"
+        queue=("${queue[@]:1}")
+        sorted_result+=("$current_path")
+        
+        local current_name
+        current_name=$(basename "$current_path")
+        
+        if [[ -n "${adjacency_list[$current_name]:-}" ]]; then
+            for dependent in ${adjacency_list[$current_name]}; do
+                in_degree["$dependent"]=$((${in_degree[$dependent]} - 1))
+                
+                if [[ ${in_degree[$dependent]} -eq 0 ]]; then
+                    for challenge_path in "${challenges_array[@]}"; do
+                        if [[ "$(basename "$challenge_path")" == "$dependent" ]]; then
+                            queue+=("$challenge_path")
+                            break
+                        fi
+                    done
+                fi
+            done
+        fi
+    done
+    
+    if [[ ${#sorted_result[@]} -ne ${#challenges_array[@]} ]]; then
+        log_warning "Circular dependency detected! Some challenges cannot be ordered."
+        for challenge_path in "${challenges_array[@]}"; do
+            local found=false
+            for sorted_path in "${sorted_result[@]}"; do
+                if [[ "$challenge_path" == "$sorted_path" ]]; then
+                    found=true
+                    break
+                fi
+            done
+            if [[ "$found" == "false" ]]; then
+                sorted_result+=("$challenge_path")
+            fi
+        done
+    fi
+}
+
 ingest_challenges() {
     local successful_installs=0
     local failed_installs=0
@@ -686,6 +838,11 @@ ingest_challenges() {
     local skipped_challenges=()
     local total_challenges=0
     local challenges_to_ingest=()
+    
+    declare -A successfully_ingested    # Track successfully ingested challenges
+    declare -A failed_to_ingest        # Track failed challenges
+    declare -A compose_deployment_status # Track docker-compose deployment status
+    declare -A challenge_requirements   # Map challenge -> requirements
     
     log_info "Discovering challenges to ingest..."
     log_debug "Scanning directory: ${CONFIG[CHALLENGE_PATH]}"
@@ -714,6 +871,13 @@ ingest_challenges() {
                 log_debug "Found challenge.yml for: $challenge_name"
                 challenges_to_ingest+=("$category/$challenge_name")
                 total_challenges=$((total_challenges + 1))
+                
+                local reqs
+                reqs=$(get_challenge_requirements "$category/$challenge_name")
+                if [[ -n "$reqs" ]]; then
+                    challenge_requirements["$challenge_name"]="$reqs"
+                    log_debug "Challenge $challenge_name has requirements: $reqs"
+                fi
             else
                 log_debug "No challenge.yml found for: $challenge_name"
             fi
@@ -726,6 +890,86 @@ ingest_challenges() {
         return 0
     }
     
+    local has_dependencies=false
+    for challenge_name in "${!challenge_requirements[@]}"; do
+        has_dependencies=true
+        break
+    done
+    
+    if [[ "$has_dependencies" == "true" ]]; then
+        log_info "Challenge dependency tree:"
+        for challenge_path in "${challenges_to_ingest[@]}"; do
+            local challenge_name
+            challenge_name=$(basename "$challenge_path")
+            if [[ -n "${challenge_requirements[$challenge_name]:-}" ]]; then
+                echo "  $challenge_name requires:"
+                echo "${challenge_requirements[$challenge_name]}" | while read -r req; do
+                    [[ -n "$req" ]] && echo "    - $req"
+                done
+            fi
+        done
+        
+        log_info "Sorting challenges by dependency order..."
+        local sorted_challenges=()
+        topological_sort_challenges challenges_to_ingest challenge_requirements sorted_challenges
+        
+        if [[ ${#sorted_challenges[@]} -eq ${#challenges_to_ingest[@]} ]]; then
+            challenges_to_ingest=("${sorted_challenges[@]}")
+            log_success "Challenges sorted in dependency order"
+        else
+            log_warning "Could not fully sort challenges (possible circular dependency)"
+            challenges_to_ingest=("${sorted_challenges[@]}")
+        fi
+    fi
+    
+    # Phase 1: Deploy all docker-compose files first if enabled
+    if [[ "${CONFIG[DEPLOY_COMPOSE]}" == "true" ]]; then
+        log_info "=== Phase 1: Deploying Docker Compose stacks ==="
+        
+        local compose_count=0
+        for challenge_path in "${challenges_to_ingest[@]}"; do
+            if [[ -f "$challenge_path/docker-compose.yml" ]]; then
+                compose_count=$((compose_count + 1))
+            fi
+        done
+        
+        if [[ $compose_count -gt 0 ]]; then
+            log_info "Found $compose_count challenges with docker-compose.yml files"
+            
+            local deployed_count=0
+            local failed_compose_count=0
+            
+            for challenge_path in "${challenges_to_ingest[@]}"; do
+                local challenge_name
+                challenge_name=$(basename "$challenge_path")
+                
+                if [[ -f "$challenge_path/docker-compose.yml" ]]; then
+                    log_info "Deploying compose for: $challenge_name"
+                    
+                    if [[ "${CONFIG[DRY_RUN]}" == "false" ]]; then
+                        if deploy_single_compose "$challenge_path"; then
+                            compose_deployment_status["$challenge_name"]="success"
+                            deployed_count=$((deployed_count + 1))
+                        else
+                            compose_deployment_status["$challenge_name"]="failed"
+                            failed_compose_count=$((failed_compose_count + 1))
+                            log_error "Docker compose deployment failed for: $challenge_name"
+                            log_warning "Will skip ingestion of $challenge_name and any challenges that depend on it"
+                        fi
+                    else
+                        echo "Would deploy docker-compose for: $challenge_name"
+                        compose_deployment_status["$challenge_name"]="success"
+                        deployed_count=$((deployed_count + 1))
+                    fi
+                fi
+            done
+            
+            log_info "Compose deployment summary: $deployed_count successful, $failed_compose_count failed"
+        else
+            log_info "No docker-compose.yml files found, skipping compose deployment phase"
+        fi
+    fi
+    
     # Confirmation prompt
     if [[ "${CONFIG[DRY_RUN]}" == "false" ]]; then
         echo
@@ -734,7 +978,8 @@ ingest_challenges() {
         read -p "Press Enter to continue with ingesting challenges, or Ctrl+C to abort..."
     fi
     
-    # Temporarily disable exit on error for this function
+    # Phase 2: Ingest challenges with dependency checking
+    log_info "=== Phase 2: Ingesting challenges ==="
     set +e
     
     local current=0
@@ -743,42 +988,104 @@ ingest_challenges() {
         challenge_name=$(basename "$challenge_path")
         current=$((current + 1))
         
-        log_info "[$current/$total_challenges] Installing $challenge_name..."
+        log_info "[$current/$total_challenges] Processing $challenge_name..."
+        
+        if [[ "${compose_deployment_status[$challenge_name]:-}" == "failed" ]]; then
+            log_error "Skipping $challenge_name: Docker compose deployment failed"
+            failed_challenges+=("$challenge_name (compose deployment failed)")
+            failed_installs=$((failed_installs + 1))
+            failed_to_ingest["$challenge_name"]="compose_failed"
+            continue
+        fi
+        
+        local can_ingest=true
+        local missing_requirements=()
+        
+        if [[ -n "${challenge_requirements[$challenge_name]:-}" ]]; then
+            log_debug "Checking requirements for $challenge_name"
+            
+            while IFS= read -r req; do
+                [[ -z "$req" ]] && continue
+                
+                log_debug "  Checking requirement: $req"
+                
+                # Check if requirement was successfully ingested
+                if [[ -z "${successfully_ingested[$req]:-}" ]]; then
+                    # Check if requirement failed to ingest
+                    if [[ -n "${failed_to_ingest[$req]:-}" ]]; then
+                        log_warning "  Requirement '$req' failed to ingest (${failed_to_ingest[$req]})"
+                        missing_requirements+=("$req")
+                        can_ingest=false
+                    else
+                        # Check if requirement exists in the list to be ingested
+                        local req_found=false
+                        for check_path in "${challenges_to_ingest[@]}"; do
+                            if [[ "$(basename "$check_path")" == "$req" ]]; then
+                                req_found=true
+                                break
+                            fi
+                        done
+                        
+                        if [[ "$req_found" == "false" ]]; then
+                            log_warning "  Requirement '$req' not found in challenges to ingest"
+                            missing_requirements+=("$req")
+                            can_ingest=false
+                        else
+                            log_warning "  Requirement '$req' has not been ingested yet (will be processed later)"
+                            missing_requirements+=("$req")
+                            can_ingest=false
+                        fi
+                    fi
+                else
+                    log_debug "  Requirement '$req' is satisfied"
+                fi
+            done <<< "${challenge_requirements[$challenge_name]}"
+        fi
+        
+        # Skip if requirements are not met
+        if [[ "$can_ingest" == "false" ]]; then
+            log_error "Skipping $challenge_name: Missing requirements: ${missing_requirements[*]}"
+            skipped_challenges+=("$challenge_name (missing: ${missing_requirements[*]})")
+            skipped_installs=$((skipped_installs + 1))
+            failed_to_ingest["$challenge_name"]="missing_requirements"
+            continue
+        fi
+        
+        # Attempt to install the challenge
+        log_info "Installing $challenge_name..."
         
         if [[ "${CONFIG[DRY_RUN]}" == "false" ]]; then
             local install_output
             local exit_code
             
-            install_output=$(ctf challenge install "$challenge_path" 2>&1)
+            local ctf_cmd="ctf"
+            if ! command -v ctf &> /dev/null; then
+                ctf_cmd="ctfcli"
+            fi
+            
+            install_output=$($ctf_cmd challenge install "$challenge_path" 2>&1)
             exit_code=$?
             
             if [[ $exit_code -eq 0 ]]; then
                 log_success "Successfully installed: $challenge_name"
                 successful_installs=$((successful_installs + 1))
-                
-                # Deploy docker-compose.yml if enabled and present
-                if [[ "${CONFIG[DEPLOY_COMPOSE]}" == "true" ]]; then
-                    if [[ -f "$challenge_path/docker-compose.yml" ]]; then
-                        if deploy_single_compose "$challenge_path"; then
-                            log_debug "Docker Compose deployed for: $challenge_name"
-                        else
-                            log_warning "Failed to deploy docker-compose for: $challenge_name"
-                        fi
-                    fi
-                fi
+                successfully_ingested["$challenge_name"]="true"
             else
                 # Check for specific error patterns
                 if echo "$install_output" | grep -q "Found already existing challenge with the same name"; then
                     log_warning "Challenge already exists: $challenge_name (use --action sync to update)"
-                    skipped_challenges+=("$challenge_name")
+                    skipped_challenges+=("$challenge_name (already exists)")
                     skipped_installs=$((skipped_installs + 1))
+                    # Consider already existing challenges as successfully ingested for dependency purposes
+                    successfully_ingested["$challenge_name"]="true"
                 elif echo "$install_output" | grep -q "could not be loaded"; then
                     log_error "Failed to install: $challenge_name"
                     local file_error
                     file_error=$(echo "$install_output" | grep "could not be loaded" | head -n1)
                     log_error "  File error: $file_error"
-                    failed_challenges+=("$challenge_name")
+                    failed_challenges+=("$challenge_name (file load error)")
                     failed_installs=$((failed_installs + 1))
+                    failed_to_ingest["$challenge_name"]="file_error"
                 else
                     log_error "Failed to install: $challenge_name"
                     # Extract the most relevant error line
@@ -797,14 +1104,13 @@ ingest_challenges() {
                     
                     failed_challenges+=("$challenge_name")
                     failed_installs=$((failed_installs + 1))
+                    failed_to_ingest["$challenge_name"]="install_error"
                 fi
             fi
         else
             echo "Would install: ctf challenge install '$challenge_path'"
-            if [[ "${CONFIG[DEPLOY_COMPOSE]}" == "true" && -f "$challenge_path/docker-compose.yml" ]]; then
-                echo "Would deploy docker-compose for: $challenge_name"
-            fi
             successful_installs=$((successful_installs + 1))
+            successfully_ingested["$challenge_name"]="true"
         fi
     done
     
@@ -812,13 +1118,16 @@ ingest_challenges() {
     set -e
     
     # Summary report
-    log_info "Challenge installation summary:"
+    echo
+    log_info "========================================="
+    log_info "Challenge Ingestion Summary"
+    log_info "========================================="
     log_success "Successfully installed: $successful_installs/$total_challenges challenges"
     
     if [[ $skipped_installs -gt 0 ]]; then
-        log_warning "Skipped (already exist): $skipped_installs/$total_challenges challenges"
+        log_warning "Skipped: $skipped_installs/$total_challenges challenges"
         if [[ ${#skipped_challenges[@]} -gt 0 ]]; then
-            log_info "Skipped challenges (use --action sync to update):"
+            log_info "Skipped challenges:"
             printf '%s\n' "${skipped_challenges[@]}" | sed 's/^/  - /'
         fi
     fi
@@ -831,6 +1140,25 @@ ingest_challenges() {
         fi
     fi
     
+    # Show dependency impact summary
+    if [[ "$has_dependencies" == "true" ]]; then
+        echo
+        log_info "Dependency Impact Analysis:"
+        local blocked_count=0
+        for challenge_name in "${!failed_to_ingest[@]}"; do
+            if [[ "${failed_to_ingest[$challenge_name]}" == "missing_requirements" ]]; then
+                blocked_count=$((blocked_count + 1))
+            fi
+        done
+        
+        if [[ $blocked_count -gt 0 ]]; then
+            log_warning "$blocked_count challenge(s) were blocked due to unmet dependencies"
+        else
+            log_success "No challenges were blocked by dependencies"
+        fi
+    fi
+    
+    echo
     if [[ $failed_installs -eq 0 && $skipped_installs -eq 0 ]]; then
         log_success "All challenges have been ingested successfully!"
     elif [[ $failed_installs -eq 0 ]]; then
@@ -846,9 +1174,13 @@ sync_challenges() {
     if [[ "${CONFIG[BACKUP_BEFORE_SYNC]}" == "true" ]]; then
         log_info "Creating backup before sync..."
         if [[ "${CONFIG[DRY_RUN]}" == "false" ]]; then
-            ctf challenge backup --output "backup-$(date +%Y%m%d-%H%M%S).zip" || log_warning "Backup failed"
+            local ctf_cmd="ctf"
+            if ! command -v ctf &> /dev/null; then
+                ctf_cmd="ctfcli"
+            fi
+            $ctf_cmd challenge backup --output "backup-$(date +%Y%m%d-%H%M%S).zip" || log_warning "Backup failed"
         else
-            echo "Would create backup: ctf challenge backup --output 'backup-$(date +%Y%m%d-%H%M%S).zip'"
+            echo "Would create backup: ctfcli challenge backup --output 'backup-$(date +%Y%m%d-%H%M%S).zip'"
         fi
     fi
     
@@ -912,7 +1244,12 @@ sync_challenges() {
             local sync_output
             local exit_code
             
-            sync_output=$(ctf challenge sync $sync_args "$challenge_path" 2>&1)
+            local ctf_cmd="ctf"
+            if ! command -v ctf &> /dev/null; then
+                ctf_cmd="ctfcli"
+            fi
+            
+            sync_output=$($ctf_cmd challenge sync $sync_args "$challenge_path" 2>&1)
             exit_code=$?
             
             if [[ $exit_code -eq 0 ]]; then
@@ -936,7 +1273,7 @@ sync_challenges() {
                 failed_syncs=$((failed_syncs + 1))
             fi
         else
-            echo "Would sync: ctf challenge sync $sync_args '$challenge_path'"
+            echo "Would sync: ctfcli challenge sync $sync_args '$challenge_path'"
             if [[ "${CONFIG[DEPLOY_COMPOSE]}" == "true" && -f "$challenge_path/docker-compose.yml" ]]; then
                 echo "Would deploy docker-compose for: $challenge_name"
             fi
@@ -1033,7 +1370,7 @@ show_status() {
         if [[ -f ".ctf/config" ]]; then
             echo "  Configuration: Found"
         else
-            echo "  Configuration: Not found (run 'ctf init' first)"
+            echo "  Configuration: Not found (run 'ctfcli init' first)"
         fi
     else
         echo -e "${YELLOW}CTFcli: Not installed${NC}"

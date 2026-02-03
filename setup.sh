@@ -54,30 +54,12 @@ declare -A CONFIG=(
     [WORKING_DIR]="/home/${SUDO_USER:-$USER}"
     [THEME]="false"
     [BACKUP_SCHEDULE]="daily"
+    [JWT_SECRET_KEY]=""
+    [DOCKER_ENV_FILE]="env.production"
 )
 
-declare -A CERT_CONFIG=(
-    [COUNTRY]="CA"
-    [STATE]="Quebec"
-    [CITY]="Montreal"
-    [ORGANISATION]="PolyCyber"
-    [OU]="PolyCyber"
-    [CN]="polycyber.io"
-    [EMAIL]="infra@polycyber.io"
-)
-
-declare -A CERT_FILES=(
-    [CA_KEY]="ca-key.pem"
-    [CA_CERT]="ca-cert.pem"
-    [SERVER_KEY]="server-key.pem"
-    [SERVER_CERT]="server-cert.pem"
-    [CLIENT_KEY]="client-key.pem"
-    [CLIENT_CERT]="client-cert.pem"
-)
-
-readonly HOST="127.0.0.11"
-readonly DOCKER_CONTAINER_IP="172.20.0.2"
-readonly DOCKER_PLUGIN_REPO="https://github.com/polycyber/CTFd-Docker-Challenges"
+readonly DOCKER_PLUGIN_REPO="https://github.com/28Pollux28/zync"
+readonly DOCKER_INSTANCER_REPO="https://github.com/28Pollux28/galvanize"
 
 show_usage() {
     cat << EOF
@@ -85,16 +67,22 @@ Usage: $SCRIPT_NAME [OPTIONS]
 
 Options:
     --ctfd-url URL          Set CTFd URL (mandatory)
+                            Note: IP addresses automatically enable --no-https
     --working-folder DIR    Set working directory (default: /home/\$USER)
     --theme                 Enable custom theme (default: false)
     --backup-schedule TYPE  Set backup schedule: daily, hourly, or 10min (default: daily)
     --help                  Show this help message
+    --instancer-url         Set instancer URL (default: local instancer)
+    --no-https              Disable HTTPS configuration for CTFd
+                            (automatically enabled for IP addresses)
 
 Examples:
     $SCRIPT_NAME --ctfd-url example.com
+    $SCRIPT_NAME --ctfd-url 192.168.1.100  # Automatically uses --no-https
     $SCRIPT_NAME --ctfd-url example.com --working-folder /opt/ctfd
     $SCRIPT_NAME --ctfd-url example.com --theme
     $SCRIPT_NAME --ctfd-url example.com --backup-schedule hourly
+    $SCRIPT_NAME --ctfd-url example.com --instancer-url http://instancer.example.com:1234
 EOF
 }
 
@@ -127,6 +115,16 @@ parse_arguments() {
                 esac
                 shift 2
                 ;;
+            --instancer-url)
+                [[ -n ${2:-} ]] || error_exit "Missing value for --instancer-url"
+                CONFIG[INSTANCER_URL]="$2"
+                shift 2
+                ;;
+            --no-https)
+                CONFIG[NO_HTTPS]="true"
+                CONFIG[DOCKER_ENV_FILE]="env.local"
+                shift
+                ;;
             --help)
                 show_usage
                 exit 0
@@ -138,11 +136,54 @@ parse_arguments() {
     done
 
     [[ -n ${CONFIG[CTFD_URL]:-} ]] || error_exit "Error: --ctfd-url is mandatory and must be specified."
+    
+    if [[ -z ${CONFIG[NO_HTTPS]:-} ]] && is_ip_address "${CONFIG[CTFD_URL]}"; then
+        log_info "Detected IP address in --ctfd-url, automatically enabling --no-https"
+        CONFIG[NO_HTTPS]="true"
+        CONFIG[DOCKER_ENV_FILE]="env.local"
+    fi
+}
+
+is_ip_address() {
+    local input="$1"
+    
+    if [[ $input =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+        local IFS='.'
+        local -a octets=($input)
+        for octet in "${octets[@]}"; do
+            if ((octet > 255)); then
+                return 1
+            fi
+        done
+        return 0
+    fi
+    
+    if [[ $input =~ : ]]; then
+        return 0
+    fi
+    
+    return 1
 }
 
 generate_password() {
     local length="${1:-15}"
     openssl rand -base64 "$((length * 3 / 4))" | tr -d '+/=' | head -c "$length"
+}
+
+setup_env_key() {
+    local key="$1"
+    local value="$2"
+    local env_file="${CONFIG[WORKING_DIR]}/infra/.env"
+    
+    if [[ ! -f "$env_file" ]]; then
+        cp "${CONFIG[WORKING_DIR]}/infra/${CONFIG[DOCKER_ENV_FILE]}" "$env_file"
+    fi
+    
+    if grep -q "^${key}=" "$env_file"; then
+        sed -i "s|^${key}=.*|${key}=${value}|" "$env_file"
+    else
+        echo "${key}=${value}" >> "$env_file"
+    fi
 }
 
 install_python_venv() {
@@ -190,7 +231,8 @@ update_system() {
         zip \
         git \
         python3-pip \
-        wget
+        wget \
+        pipx
 
     install_python_venv
 
@@ -257,130 +299,6 @@ install_pipx() {
         su - $SUDO_USER -c "echo 'export PATH=\$PATH:\$HOME/.local/bin' >> ~/.bashrc"
     fi
     log_success "pipx installed and configured"
-}
-
-create_certificates() {
-    local cert_dir="${CONFIG[WORKING_DIR]}/cert"
-    local ca_password
-
-    ca_password=$(generate_password 32)
-
-    log_info "Creating certificates in $cert_dir..."
-
-    mkdir -p "$cert_dir"
-    cd "$cert_dir" || error_exit "Cannot access certificate directory"
-
-    log_info "Generating CA private key..."
-    openssl genrsa -aes256 -passout "pass:$ca_password" -out "${CERT_FILES[CA_KEY]}" 4096
-
-    log_info "Generating CA certificate..."
-    openssl req -new -x509 -days 365 \
-        -key "${CERT_FILES[CA_KEY]}" \
-        -passin "pass:$ca_password" \
-        -sha256 \
-        -out "${CERT_FILES[CA_CERT]}" \
-        -subj "/C=${CERT_CONFIG[COUNTRY]}/ST=${CERT_CONFIG[STATE]}/L=${CERT_CONFIG[CITY]}/O=${CERT_CONFIG[ORGANISATION]}/OU=${CERT_CONFIG[OU]}/CN=${CERT_CONFIG[CN]}/emailAddress=${CERT_CONFIG[EMAIL]}"
-
-    cat "${CERT_FILES[CA_CERT]}" >> /etc/ssl/certs/ca-certificates.crt
-    update-ca-certificates
-
-    log_info "Generating server certificates..."
-    openssl genrsa -out "${CERT_FILES[SERVER_KEY]}" 4096
-    openssl req -subj "/CN=$HOST" -sha256 -new \
-        -key "${CERT_FILES[SERVER_KEY]}" \
-        -out server.csr
-
-    cat > server-extfile.cnf << EOF
-subjectAltName = DNS:$HOST,IP:$DOCKER_CONTAINER_IP
-extendedKeyUsage = serverAuth
-EOF
-
-    openssl x509 -req -days 365 -sha256 \
-        -in server.csr \
-        -CA "${CERT_FILES[CA_CERT]}" \
-        -CAkey "${CERT_FILES[CA_KEY]}" \
-        -passin "pass:$ca_password" \
-        -CAcreateserial \
-        -out "${CERT_FILES[SERVER_CERT]}" \
-        -extfile server-extfile.cnf
-
-    log_info "Generating client certificates..."
-    openssl genrsa -out "${CERT_FILES[CLIENT_KEY]}" 4096
-    openssl req -subj '/CN=client' -new \
-        -key "${CERT_FILES[CLIENT_KEY]}" \
-        -out client.csr
-
-    echo "extendedKeyUsage = clientAuth" > client-extfile.cnf
-
-    openssl x509 -req -days 365 -sha256 \
-        -in client.csr \
-        -CA "${CERT_FILES[CA_CERT]}" \
-        -CAkey "${CERT_FILES[CA_KEY]}" \
-        -passin "pass:$ca_password" \
-        -CAcreateserial \
-        -out "${CERT_FILES[CLIENT_CERT]}" \
-        -extfile client-extfile.cnf
-
-    rm -f server.csr client.csr server-extfile.cnf client-extfile.cnf
-
-    zip -j cert.zip "${CERT_FILES[CA_CERT]}" "${CERT_FILES[CLIENT_CERT]}" "${CERT_FILES[CLIENT_KEY]}"
-
-    chmod 0400 "${CERT_FILES[CA_KEY]}" "${CERT_FILES[CLIENT_KEY]}" "${CERT_FILES[SERVER_KEY]}"
-    chmod 0444 "${CERT_FILES[CA_CERT]}" "${CERT_FILES[SERVER_CERT]}" "${CERT_FILES[CLIENT_CERT]}"
-
-    log_success "Certificates created successfully in $cert_dir"
-    log_info "Generated secrets:"
-    log_info "  CA password: $ca_password"
-}
-
-configure_docker_tls() {
-    local cert_dir="${CONFIG[WORKING_DIR]}/cert"
-    local docker_conf_dir="/etc/systemd/system/docker.service.d"
-    local docker_conf_file="$docker_conf_dir/override.conf"
-
-    log_info "Configuring Docker for TLS..."
-
-    local required_certs=(
-        "$cert_dir/${CERT_FILES[CA_CERT]}"
-        "$cert_dir/${CERT_FILES[SERVER_CERT]}"
-        "$cert_dir/${CERT_FILES[SERVER_KEY]}"
-    )
-
-    local missing_certs=()
-    for cert in "${required_certs[@]}"; do
-        if [[ ! -f $cert ]]; then
-            missing_certs+=("$cert")
-        fi
-    done
-
-    if [[ ${#missing_certs[@]} -gt 0 ]]; then
-        log_info "Generating missing certificates..."
-        create_certificates
-    fi
-
-    mkdir -p "$docker_conf_dir"
-
-    if [[ -f $docker_conf_file ]]; then
-        cp "$docker_conf_file" "$docker_conf_file.backup"
-    fi
-
-    local dockerd_path
-    dockerd_path=$(command -v dockerd) || error_exit "dockerd not found"
-
-    cat > "$docker_conf_file" << EOF
-[Service]
-ExecStart=
-ExecStart=$dockerd_path --tls --tlsverify --tlscacert=$cert_dir/${CERT_FILES[CA_CERT]} --tlscert=$cert_dir/${CERT_FILES[SERVER_CERT]} --tlskey=$cert_dir/${CERT_FILES[SERVER_KEY]} -H=0.0.0.0:2376 -H=fd://
-EOF
-
-    systemctl daemon-reload
-    systemctl restart docker.service
-
-    if netstat -lntp 2>/dev/null | grep -q dockerd; then
-        log_success "Docker TLS configuration complete"
-    else
-        error_exit "Docker TLS configuration failed - port not listening"
-    fi
 }
 
 setup_backup_script() {
@@ -523,19 +441,58 @@ copy_themes() {
 
 install_ctfd() {
     local working_dir="${CONFIG[WORKING_DIR]}"
-    local plugin_name="CTFd-Docker-Challenges"
+    local plugin_name="zync"
     local plugin_path="$working_dir/$plugin_name"
     local compose_file="$working_dir/infra/docker-compose.yml"
 
     log_info "Installing CTFd..."
 
     if [[ ! -d $plugin_path ]]; then
-        log_info "Cloning CTFd Docker Challenges plugin..."
+        log_info "Cloning zync instancer plugin..."
         git -C "$working_dir" clone "$DOCKER_PLUGIN_REPO"
     else
-        log_info "Plugin already exists, updating..."
+        log_info "Zync plugin already exists, updating..."
         git -C "$plugin_path" pull
+    fi    
+    log_success "Instancer plugin configuration complete"
+
+    if [[ "${CONFIG[INSTANCER_URL]:-}" == "" ]]; then
+        local instancer_path="$working_dir/galvanize"
+        local cert_dir="${CONFIG[WORKING_DIR]}/cert"
+        local PRIVATE_KEY_PATH="$cert_dir/galvanize-instancer-key"
+        local PUBLIC_KEY_PATH="${PRIVATE_KEY_PATH}.pub"
+        local CONFIG_PATH="$working_dir/data/galvanize/config.yaml"
+        log_info "Setting up local instancer..."
+
+        if [[ ! -d $instancer_path ]]; then
+            log_info "Cloning galvanize instancer..."
+            git -C "$working_dir" clone "$DOCKER_INSTANCER_REPO"
+        else
+            log_info "Instancer already exists, updating..."
+            git -C "$instancer_path" pull
+        fi
+        cp "$instancer_path/config.example.yaml" "$CONFIG_PATH"
+
+        mkdir -p "$cert_dir"         
+
+        ssh-keygen -t rsa -b 4096 -f "$PRIVATE_KEY_PATH" -N "" -q
+        chmod 600 "$PRIVATE_KEY_PATH"
+        chown "${SUDO_USER:-$USER}:${SUDO_USER:-$USER}" "$PRIVATE_KEY_PATH"
+
+        chmod 644 "$PUBLIC_KEY_PATH"
+
+        cat "$PUBLIC_KEY_PATH" >> "/home/${SUDO_USER:-$USER}/.ssh/authorized_keys"
+
+        setup_env_key GALVANIZE_REPO_PATH "$instancer_path"
+        setup_env_key GALVANIZE_CONFIG_PATH "$CONFIG_PATH"
+        setup_env_key SSH_KEY_PATH "$PRIVATE_KEY_PATH"
+        mkdir -p "$working_dir/data/galvanize"
+        cp -a "$instancer_path/data/." "$working_dir/data/galvanize"
+        chown -R "${SUDO_USER:-$USER}:${SUDO_USER:-$USER}" "$working_dir/data/galvanize"
     fi
+
+
+    # Configure plugin access in DB --> add JWT key + instancer URL
 
     if [[ -f $compose_file ]]; then
         cp "$compose_file" "$compose_file.backup"
@@ -546,22 +503,32 @@ install_ctfd() {
     local secret_key
     local db_password
     local db_root_password
+    local jwt_secret_key
 
     secret_key=$(generate_password 32)
     db_password=$(generate_password 16)
     db_root_password=$(generate_password 16)
+    jwt_secret_key=$(generate_password 48)
+    CONFIG[JWT_SECRET_KEY]="$jwt_secret_key"
 
     log_info "Updating configuration with new secrets..."
 
-    sed -i "s/SECRET_KEY=.*/SECRET_KEY=$secret_key/" "$compose_file"
+    setup_env_key SECRET_KEY "$secret_key"
+    # sed -i "s/SECRET_KEY=.*/SECRET_KEY=$secret_key/" "$compose_file"
 
-    sed -i "s/db_password/$db_password/g" "$compose_file"
-    sed -i "s/db_root_password/$db_root_password/g" "$compose_file"
+    # sed -i "s/db_password/$db_password/g" "$compose_file"
+    setup_env_key MARIADB_PASSWORD "$db_password"
+    # sed -i "s/db_root_password/$db_root_password/g" "$compose_file"
+    setup_env_key MARIADB_ROOT_PASSWORD "$db_root_password"
     log_info "Configuration updated with new secrets"
 
-    sed -i "s|BASE_DOMAIN=.*|BASE_DOMAIN=${CONFIG[CTFD_URL]}|" "$compose_file"
+    setup_env_key BASE_DOMAIN "${CONFIG[CTFD_URL]}"
+    # sed -i "s|BASE_DOMAIN=.*|BASE_DOMAIN=${CONFIG[CTFD_URL]}|" "$compose_file"
 
-    log_info "Pulling necessary docker images..."
+    log_info "Pulling and building necessary docker images..."
+    log_info "Building docker images... This may take a while"
+    docker compose -f "$compose_file" build
+    log_success "Docker images successfully built"
     docker compose -f "$compose_file" pull -q
     log_success "Docker images successfully pulled"
 
@@ -581,12 +548,24 @@ install_ctfd() {
     echo -e "\tdocker compose -f "$compose_file" up -d"
 
     log_success "CTFd installation complete!"
-    log_info "Download certificates with: scp -r ${SUDO_USER:-$USER}@<server_ip>:${CONFIG[WORKING_DIR]}/cert/cert.zip <local_path>"
 
     log_info "Generated secrets:"
     log_info "  Secret Key: $secret_key"
     log_info "  DB Password: $db_password"
     log_info "  DB Root Password: $db_root_password"
+}
+
+configure_instancer() {
+    local working_dir="${CONFIG[WORKING_DIR]}"
+    local instancer_path="$working_dir/galvanize"
+    local CONFIG_PATH="$working_dir/data/galvanize/config.yaml"
+
+    sed -i "s|your-secret-key-here|${CONFIG[JWT_SECRET_KEY]}|g" "$CONFIG_PATH"
+    sed -i "s|your-ssh-user|"${SUDO_USER:-$USER}"|g" "$CONFIG_PATH"
+    sed -i "s|your-server-ip,|${CONFIG[CTFD_URL]},|g" "$CONFIG_PATH"
+    sed -i "s|challs.example.com|${CONFIG[CTFD_URL]}|g" "$CONFIG_PATH"
+
+    log_success "Local instancer setup complete"
 }
 
 create_and_set_owner() {
@@ -601,6 +580,11 @@ create_and_set_owner() {
     mkdir -p "$upload_folder"
     mkdir -p "$log_folder"
     mkdir -p "$themes_folder"
+    mkdir -p "$working_dir/data/galvanize/challenges"
+    mkdir -p "$working_dir/data/galvanize/playbooks"
+
+
+    chown -R "${SUDO_USER:-$USER}:${SUDO_USER:-$USER}" "$working_dir/data"
 
     # Change ownership to 1001
     chown -R 1001:1001 "$upload_folder"
@@ -615,16 +599,13 @@ main() {
 
     update_system
 
-    install_pipx
+    # install_pipx
     install_docker
-
-    create_certificates
-
-    configure_docker_tls
 
     create_and_set_owner
 
     install_ctfd
+    configure_instancer 
 
     # Setup database backup
     setup_backup_script

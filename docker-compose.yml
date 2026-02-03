@@ -1,48 +1,75 @@
 ---
 services:
   ctfd:
-    image: ctfd/ctfd:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.ctfd
     container_name: ctfd
     hostname: ctfd
     restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ctfd.rule=Host(`${BASE_DOMAIN}`)"
+      - "traefik.http.routers.ctfd.entrypoints=${ENTRYPOINTS:-web}"
+      - "traefik.http.routers.ctfd.service=ctfd"
+      - "traefik.http.routers.ctfd.tls=${ENABLE_TLS:-false}"
+      - "traefik.http.routers.ctfd.tls.certresolver=${TLS_RESOLVER:-}"
+      - "traefik.http.routers.ctfd.tls.options=${TLS_OPTIONS:-}"
+      - "traefik.http.routers.ctfd.middlewares=${MIDDLEWARES:-}"
+      - "traefik.http.routers.ctfd-insecure.rule=Host(`${BASE_DOMAIN}`)"
+      - "traefik.http.routers.ctfd-insecure.entrypoints=web"
+      - "traefik.http.routers.ctfd-insecure.middlewares=${REDIRECT_MIDDLEWARE:-}"
+      - "traefik.http.services.ctfd.loadbalancer.server.port=8000"
     environment:
       - UPLOAD_FOLDER=/var/uploads
-      - DATABASE_URL=mysql+pymysql://db_user:db_password@maria-db/ctfd
+      - DATABASE_URL=mysql+pymysql://db_user:${MARIADB_PASSWORD:-db_password}@maria-db/ctfd
       - REDIS_URL=redis://redis:6379
-      - WORKERS=4 # Check if we need to adjust this
+      - WORKERS=4
       - LOG_FOLDER=/var/log/CTFd
       - ACCESS_LOG=-
       - ERROR_LOG=-
       - REVERSE_PROXY=true
-      - SECRET_KEY=SecretKeyHere
+      - SECRET_KEY=${SECRET_KEY:-LocalDevSecretKeyChangeInProduction}
     volumes:
       - ../data/CTFd/logs:/var/log/CTFd
       - ../data/CTFd/uploads:/var/uploads
-#      - ../data/CTFd/themes:/opt/CTFd/CTFd/themes       # Only enable if a custom theme is desired, and don't forget to add the custom theme to the folder before starting the container
-      - ../CTFd-Docker-Challenges/docker_challenges:/opt/CTFd/CTFd/plugins/docker_challenges:ro
+#      - ../data/CTFd/themes:/opt/CTFd/CTFd/themes        # Only enable if a custom theme is desired, and don't forget to add the custom theme to the folder before starting the container
+      - ../zync:/opt/CTFd/CTFd/plugins/zync:ro
     depends_on:
       - redis
+      - maria-db
     networks:
       - default
       - internal
 
-  caddy:
-  # https://caddyserver.com/docs/running#docker-compose
-    image: caddy:2.9.1-alpine
-    container_name: caddy
-    hostname: caddy
+  traefik:
+    image: traefik:2.11
+    container_name: traefik
     restart: unless-stopped
+    command:
+      - "--log.level=${LOG_LEVEL:-INFO}"
+      - "--api.insecure=${API_INSECURE:-false}"
+      - "--api.dashboard=${API_DASHBOARD:-false}"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      # All the rest is used only in production
+      - "--entrypoints.websecure.address=:443"
+      - "--providers.file.directory=/etc/traefik/dynamic"
+      - "--providers.file.watch=true"
+      - "--certificatesresolvers.myresolver.acme.tlschallenge=${ACME_ENABLED:-false}"
+      - "--certificatesresolvers.myresolver.acme.email=${ACME_EMAIL:-}"
+      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+      - "--certificatesresolvers.myresolver.acme.caserver=${ACME_CA_SERVER:-https://acme-v02.api.letsencrypt.org/directory}"
     ports:
       - "80:80"
-      - "443:443"
+      - "${HTTPS_PORT:-443}:443"
     environment:
-      - BASE_DOMAIN=localhost
+      - BASE_DOMAIN=${BASE_DOMAIN:-localhost}
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ../data/caddy/data:/data
-      - ../data/caddy/config:/config
-    depends_on:
-      - ctfd
+      - "${DYNAMIC_CONFIG:-./dynamic.yml}:/etc/traefik/dynamic/dynamic.yml:ro"
+      - "${LETSENCRYPT_DIR:-./letsencrypt-disabled}:/letsencrypt"
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
     networks:
       - default
 
@@ -53,9 +80,9 @@ services:
     container_name: maria-db
     hostname: maria-db
     environment:
-      - MARIADB_ROOT_PASSWORD=db_root_password
+      - MARIADB_ROOT_PASSWORD=${MARIADB_ROOT_PASSWORD:-db_root_password}
       - MARIADB_USER=db_user
-      - MARIADB_PASSWORD=db_password
+      - MARIADB_PASSWORD=${MARIADB_PASSWORD:-db_password}
       - MARIADB_DATABASE=ctfd
       - MARIADB_AUTO_UPGRADE=1
     volumes:
@@ -71,9 +98,40 @@ services:
     image: redis:7.4.2-alpine
     restart: unless-stopped
     volumes:
-    - ../data/redis:/data
+      - ../data/redis:/data
     networks:
-        internal:
+      - internal
+
+  instancer:
+    build:
+      context: ${GALVANIZE_REPO_PATH:-../galvanize}
+      dockerfile: galvanize-instancer/Dockerfile
+    container_name: galvanize-instancer
+    stop_grace_period: 1m
+    stop_signal: SIGINT
+    ports:
+      - "8080:8080"
+    environment:
+      - "DEVELOPMENT=true"
+    entrypoint:
+      - "./galvanize"
+      - "serve"
+      - "8080"
+      - "--config"
+      - "data/config.yaml"
+    volumes:
+      - ../data/galvanize:/app/data/:Z
+      - ${GALVANIZE_CONFIG_PATH:-../galvanize/config.yaml}:/app/data/config.yaml:Z
+      - ${SSH_KEY_PATH:-../ssh/ssh-key}:/home/galvanize/.ssh/ansible-ssh:Z,ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - internal
+      - default
 
 networks:
     default:

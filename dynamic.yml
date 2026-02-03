@@ -1,0 +1,16 @@
+http:
+  routers:
+    ctfd-router:
+      rule: "Host(`${BASE_DOMAIN}`)"
+      entryPoints:
+        - web
+        - websecure
+      service: ctfd-service
+      tls:
+        certResolver: myresolver
+
+  services:
+    ctfd-service:
+      loadBalancer:
+        servers:
+          - url: "http://ctfd:8000"

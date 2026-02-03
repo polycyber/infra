@@ -1,3 +1,0 @@
-http://<server_ip> {
-    reverse_proxy ctfd:8000
-}

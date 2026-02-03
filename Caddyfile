@@ -1,3 +1,0 @@
-{$BASE_DOMAIN} {
-    reverse_proxy ctfd:8000
-}

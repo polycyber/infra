@@ -1,0 +1,15 @@
+FROM ctfd/ctfd:latest
+
+USER root
+
+# Inject the plugin requirements installation code right after the first 'fi' statement
+RUN sed -i '0,/^fi$/a\
+\
+# Install plugin requirements\
+for d in CTFd/plugins/*; do \
+    if [ -f "$d/requirements.txt" ]; then \
+        pip install --no-cache-dir -r "$d/requirements.txt"; \
+    fi; \
+done' /opt/CTFd/docker-entrypoint.sh
+
+USER 1001
