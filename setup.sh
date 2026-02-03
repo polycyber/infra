@@ -13,9 +13,9 @@ readonly NC='\033[0m' # No Color
 
 readonly DOCKER_PLUGIN_REPO="https://github.com/28Pollux28/zync"
 readonly DOCKER_INSTANCER_REPO="https://github.com/28Pollux28/galvanize"
+readonly ANSIBLE_USER="ansible-user"
 
 declare -A CONFIG=(
-    [GENERATE_CERTS]="true"
     [CONFIGURE_DOCKER]="true"
     [WORKING_DIR]="/home/${SUDO_USER:-$USER}"
     [THEME]=""
@@ -412,6 +412,10 @@ install_ctfd() {
     local plugin_path="$working_dir/$plugin_name"
     local compose_file="$working_dir/infra/docker-compose.yml"
 
+    local jwt_secret_key
+    jwt_secret_key=$(generate_password 48)
+    CONFIG[JWT_SECRET_KEY]="$jwt_secret_key"
+
     log_info "Installing CTFd..."
 
     if [[ ! -d $plugin_path ]]; then
@@ -425,9 +429,6 @@ install_ctfd() {
 
     if [[ "${CONFIG[INSTANCER_URL]:-}" == "" ]]; then
         local instancer_path="$working_dir/galvanize"
-        local cert_dir="${CONFIG[WORKING_DIR]}/cert"
-        local PRIVATE_KEY_PATH="$cert_dir/galvanize-instancer-key"
-        local PUBLIC_KEY_PATH="${PRIVATE_KEY_PATH}.pub"
         local CONFIG_PATH="$working_dir/data/galvanize/config.yaml"
         log_info "Setting up local instancer..."
 
@@ -440,22 +441,15 @@ install_ctfd() {
         fi
         cp "$instancer_path/config.example.yaml" "$CONFIG_PATH"
 
-        mkdir -p "$cert_dir"         
-
-        ssh-keygen -t rsa -b 4096 -f "$PRIVATE_KEY_PATH" -N "" -q
-        chmod 600 "$PRIVATE_KEY_PATH"
-        chown "${SUDO_USER:-$USER}:${SUDO_USER:-$USER}" "$PRIVATE_KEY_PATH"
-
-        chmod 644 "$PUBLIC_KEY_PATH"
-
-        cat "$PUBLIC_KEY_PATH" >> "/home/${SUDO_USER:-$USER}/.ssh/authorized_keys"
-
         setup_env_key GALVANIZE_REPO_PATH "$instancer_path"
         setup_env_key GALVANIZE_CONFIG_PATH "$CONFIG_PATH"
-        setup_env_key SSH_KEY_PATH "$PRIVATE_KEY_PATH"
         mkdir -p "$working_dir/data/galvanize"
         cp -a "$instancer_path/data/." "$working_dir/data/galvanize"
         chown -R "${SUDO_USER:-$USER}:${SUDO_USER:-$USER}" "$working_dir/data/galvanize"
+        
+        # Setup ansible user before instancer configuration
+        setup_ansible_user
+        configure_instancer 
     fi
 
 
@@ -470,13 +464,10 @@ install_ctfd() {
     local secret_key
     local db_password
     local db_root_password
-    local jwt_secret_key
 
     secret_key=$(generate_password 32)
     db_password=$(generate_password 16)
     db_root_password=$(generate_password 16)
-    jwt_secret_key=$(generate_password 48)
-    CONFIG[JWT_SECRET_KEY]="$jwt_secret_key"
 
     log_info "Updating configuration with new secrets..."
 
@@ -518,6 +509,93 @@ install_ctfd() {
 }
 
 # ============================================================================
+# Ansible User Setup
+# ============================================================================
+
+setup_ansible_user() {
+    local working_dir="${CONFIG[WORKING_DIR]}"
+    local ssh_key_dir="$working_dir/ansible-ssh"
+    local private_key_path="$ssh_key_dir/ansible_rsa"
+    local public_key_path="${private_key_path}.pub"
+    
+    log_info "Setting up Ansible user: $ANSIBLE_USER"
+    
+    # Check if user already exists
+    if id "$ANSIBLE_USER" &>/dev/null; then
+        log_warning "User $ANSIBLE_USER already exists"
+        read -p "Do you want to recreate the SSH keys? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            log_info "Skipping Ansible user setup"
+            return 0
+        fi
+    else
+        # Create the ansible user
+        log_info "Creating user: $ANSIBLE_USER"
+        useradd -m -s /bin/bash "$ANSIBLE_USER"
+        log_success "User $ANSIBLE_USER created successfully"
+    fi
+    
+    # Create SSH directory for ansible user
+    local ansible_home="/home/$ANSIBLE_USER"
+    local ansible_ssh_dir="$ansible_home/.ssh"
+    
+    mkdir -p "$ansible_ssh_dir"
+    chmod 700 "$ansible_ssh_dir"
+    
+    # Create directory for storing keys in working directory
+    mkdir -p "$ssh_key_dir"
+    
+    # Generate SSH key pair
+    log_info "Generating SSH key pair for Ansible..."
+    ssh-keygen -t rsa -b 4096 -f "$private_key_path" -N "" -C "ansible@galvanize-instancer" -q
+    setup_env_key SSH_KEY_PATH "$private_key_path"
+
+    if [[ ! -f "$private_key_path" ]] || [[ ! -f "$public_key_path" ]]; then
+        error_exit "Failed to generate SSH keys"
+    fi
+    
+    log_success "SSH key pair generated"
+    
+    # Set up authorized_keys for ansible user
+    local authorized_keys="$ansible_ssh_dir/authorized_keys"
+    cat "$public_key_path" > "$authorized_keys"
+    
+    # Set proper permissions
+    chmod 600 "$authorized_keys"
+    chown -R "$ANSIBLE_USER:$ANSIBLE_USER" "$ansible_ssh_dir"
+    
+    log_success "SSH keys configured for $ANSIBLE_USER"
+    
+    # Add user to docker group
+    log_info "Adding $ANSIBLE_USER to docker group..."
+    if ! getent group docker > /dev/null 2>&1; then
+        log_warning "Docker group doesn't exist, creating it..."
+        groupadd docker
+    fi
+    
+    usermod -aG docker "$ANSIBLE_USER"
+    log_success "$ANSIBLE_USER added to docker group"
+    
+    # Set ownership of keys in working directory
+    chmod 600 "$private_key_path"
+    chmod 644 "$public_key_path"
+    chown "${SUDO_USER:-$USER}:${SUDO_USER:-$USER}" "$ssh_key_dir"
+    chown "${SUDO_USER:-$USER}:${SUDO_USER:-$USER}" "$private_key_path"
+    chown "${SUDO_USER:-$USER}:${SUDO_USER:-$USER}" "$public_key_path"
+    
+    log_success "Ansible user setup complete!"
+    log_info "SSH private key: $private_key_path"
+    log_info "SSH public key: $public_key_path"
+    log_info ""
+    log_info "To use this user with Ansible, configure your inventory with:"
+    log_info "  ansible_user: $ANSIBLE_USER"
+    log_info "  ansible_ssh_private_key_file: $private_key_path"
+    log_info ""
+    log_info "The user has been added to the docker group for container management."
+}
+
+# ============================================================================
 # Instancer Configuration
 # ============================================================================
 
@@ -527,7 +605,7 @@ configure_instancer() {
     local CONFIG_PATH="$working_dir/data/galvanize/config.yaml"
 
     sed -i "s|your-secret-key-here|${CONFIG[JWT_SECRET_KEY]}|g" "$CONFIG_PATH"
-    sed -i "s|your-ssh-user|"${SUDO_USER:-$USER}"|g" "$CONFIG_PATH"
+    sed -i "s|your-ssh-user|$ANSIBLE_USER|g" "$CONFIG_PATH"
     sed -i "s|your-server-ip,|${CONFIG[CTFD_URL]},|g" "$CONFIG_PATH"
     sed -i "s|challs.example.com|${CONFIG[CTFD_URL]}|g" "$CONFIG_PATH"
 
@@ -540,29 +618,25 @@ configure_instancer() {
 
 setup_backup_script() {
     local working_dir="${CONFIG[WORKING_DIR]}"
-    local infra_dir="$working_dir/infra"
-    local backup_script_src="$infra_dir/backup_db.sh"
-    local backup_script_dest="$working_dir/backup_db.sh"
+    local backup_script="$working_dir/infra/backup_db.sh"
     
     log_info "Setting up database backup script..."
     
-    if [[ ! -f "$backup_script_src" ]]; then
-        log_error "Backup script not found at: $backup_script_src"
+    if [[ ! -f "$backup_script" ]]; then
+        log_error "Backup script not found at: $backup_script"
         log_warning "Skipping backup script setup"
         return 1
     fi
     
-    # Copy backup script to working directory
-    cp "$backup_script_src" "$backup_script_dest"
-    chmod +x "$backup_script_dest"
-    chown "${SUDO_USER:-$USER}:${SUDO_USER:-$USER}" "$backup_script_dest"
+    chmod +x "$backup_script"
+    chown "${SUDO_USER:-$USER}:${SUDO_USER:-$USER}" "$backup_script"
     
-    log_success "Backup script copied to: $backup_script_dest"
+    log_success "Backup script setup at: $backup_script"
 }
 
 setup_backup_cron() {
     local working_dir="${CONFIG[WORKING_DIR]}"
-    local backup_script="$working_dir/backup_db.sh"
+    local backup_script="$working_dir/infra/backup_db.sh"
     local cron_log="$working_dir/cron_backup.log"
     local user="${SUDO_USER:-$USER}"
     local schedule="${CONFIG[BACKUP_SCHEDULE]}"
@@ -633,7 +707,6 @@ main() {
     create_and_set_owner
 
     install_ctfd
-    configure_instancer 
 
     # Setup database backup
     setup_backup_script

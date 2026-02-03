@@ -36,8 +36,10 @@ services:
 #      - ../data/CTFd/themes/custom:/opt/CTFd/CTFd/themes/custom        # Only enable if a custom theme is desired
       - ../zync:/opt/CTFd/CTFd/plugins/zync:ro
     depends_on:
-      - redis
-      - maria-db
+      redis:
+        condition: service_started
+      maria-db:
+        condition: service_healthy
     networks:
       - default
       - internal
@@ -89,6 +91,12 @@ services:
       - ../data/mysql:/var/lib/mysql
     networks:
       - internal
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     # This command is required to set important mariadb defaults
     command: [mysqld, --character-set-server=utf8mb4, --collation-server=utf8mb4_unicode_ci, --wait_timeout=28800, --log-warnings=0]
 
