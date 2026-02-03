@@ -79,7 +79,10 @@ Script Bash avancé pour la construction, l'ingestion et la synchronisation des 
 ./setup.sh --ctfd-url exemple.com --working-folder /opt/ctfd
 
 # Installation avec thème personnalisé activé
-./setup.sh --ctfd-url exemple.com --theme
+./setup.sh --ctfd-url exemple.com --theme  /home/user/my-custom-theme
+
+# Installation avec thème personnalisé activé en téléchargeant un thème depuis github directement 
+./setup.sh --ctfd-url exemple.com --theme https://github.com/user/theme.git
 
 # Sauvegarde toutes les heures
 ./setup.sh --ctfd-url exemple.com --backup-schedule hourly
@@ -93,10 +96,7 @@ Script Bash avancé pour la construction, l'ingestion et la synchronisation des 
 
 #### Configuration du thème personnalisé
 
-Si vous utilisez l'option `--theme`, le script activera automatiquement le montage du dossier de thèmes dans le `docker-compose.yml`. 
-
-> [!WARNING]  
-> Vous devez placer votre thème personnalisé dans le dossier `theme/` du répertoire de travail avant de démarrer les conteneurs Docker. Ce dossier sera créé automatiquement durant l'installation.
+Si vous utilisez l'option `--theme`, le script activera automatiquement le montage du thème personnalisé dans le `docker-compose.yml`. 
 
 ### Outil de gestion des challenges
 
@@ -249,9 +249,8 @@ Le script génère automatiquement :
 
 #### 6. Configuration des thèmes (optionnel)
 Si l'option `--theme` est utilisée :
-- Active le montage du dossier `theme/` dans le conteneur CTFd
+- Active le montage du dossier `theme/custom/` dans le conteneur CTFd
 - Permet l'utilisation de thèmes personnalisés
-- Les thèmes doivent être placés manuellement dans le dossier avant le démarrage des conteneurs
   
 ### Outil de gestion des challenges
 
