@@ -5,10 +5,32 @@
 [[ -n "${_SETUP_THEME_LOADED:-}" ]] && return 0
 readonly _SETUP_THEME_LOADED=1
 
+extract_theme_name() {
+    local theme_source="$1"
+    local theme_name
+
+    # Remove trailing slash if present
+    theme_source="${theme_source%/}"
+
+    # For git URLs, remove .git suffix and get the last part
+    if is_git_url "$theme_source"; then
+        theme_name="${theme_source##*/}"  # Get the part after last /
+        theme_name="${theme_name%.git}"   # Remove .git if present
+    else
+        # For local paths, get the basename
+        theme_name="$(basename "$theme_source")"
+    fi
+
+    echo "$theme_name"
+}
+
 setup_custom_theme() {
     local theme_source="${CONFIG[THEME]}"
     local working_dir="${CONFIG[WORKING_DIR]}"
-    local custom_theme_dir="$working_dir/data/CTFd/themes/custom"
+    local theme_name
+    theme_name="$(extract_theme_name "$theme_source")"
+    CONFIG[THEME_NAME]="$theme_name"
+    local custom_theme_dir="$working_dir/data/CTFd/themes/$theme_name"
 
     if [[ -z "$theme_source" ]]; then
         log_info "No custom theme specified"
@@ -39,13 +61,18 @@ setup_custom_theme() {
             return 1
         fi
     else
+        local source_path="$theme_source"
         if [[ ! -d "$theme_source" ]]; then
-            log_error "Theme directory not found: $theme_source"
-            return 1
+            if [[ ! -d "$working_dir/$theme_source" ]]; then
+                log_error "Theme directory not found: $theme_source"
+                return 1
+            else
+                source_path="$working_dir/$theme_source"
+            fi 
         fi
 
         log_info "Copying local theme directory..."
-        if ! cp -r "$theme_source"/* "$custom_theme_dir"/; then
+        if ! cp -r "$source_path"/* "$custom_theme_dir"/; then
             log_error "Failed to copy local theme"
             return 1
         fi

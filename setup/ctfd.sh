@@ -103,11 +103,13 @@ install_ctfd() {
         log_info "Custom theme option enabled"
 
         if setup_custom_theme; then
-            if sed -i 's|^[[:space:]]*#\(.*themes/custom:.*\)|\1|' "$compose_file"; then
+            if sed -i 's|^[[:space:]]*#\(.*CTFd/themes.*\)|\1|' "$compose_file"; then
                 log_success "Custom theme volume mount enabled in docker-compose.yml"
             else
                 log_warning "Could not uncomment theme line in docker-compose.yml; enable it manually"
             fi
+            setup_env_key THEME_NAME "${CONFIG[THEME_NAME]}"
+            log_info "THEME_NAME set to: ${CONFIG[THEME_NAME]}"
         else
             log_warning "Theme setup failed, but continuing with setup"
         fi
