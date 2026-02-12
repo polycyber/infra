@@ -6,7 +6,7 @@ L'objectif de ce dépot est de rassembler l'ensemble des ressources utilisées p
 
 ### 1. Script d'Installation CTFd (`setup.sh`)
 
-Script Bash qui automatise l'installation et la configuration d'un serveur CTFd utilisant le plugin [Zync](https://github.com/28Pollux28/zinc) et son instancer dédié [Galvanize](https://github.com/28Pollux28/galvanize).
+Script Bash qui automatise l'installation et la configuration d'un serveur CTFd utilisant le plugin [Zync](https://github.com/28Pollux28/zync) et son instancer dédié [Galvanize](https://github.com/28Pollux28/galvanize).
 
 ### 2. Outil de Gestion des Challenges (`challenges_management.sh`)
 

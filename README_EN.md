@@ -6,7 +6,7 @@ The purpose of this repository is to gather all the resources used to deploy Pol
 
 ### 1. CTFd Installation Script (`setup.sh`)
 
-Bash script that automates the installation and configuration of a CTFd server using the [Zync](https://github.com/28Pollux28/zinc) plugin and its dedicated instancer[Galvanize](https://github.com/28Pollux28/galvanize).
+Bash script that automates the installation and configuration of a CTFd server using the [Zync](https://github.com/28Pollux28/zync) plugin and its dedicated instancer[Galvanize](https://github.com/28Pollux28/galvanize).
 
 ### 2. Challenge Management Tool (`challenges_management.sh`)
 
