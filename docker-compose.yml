@@ -113,7 +113,6 @@ services:
     entrypoint:
       - "./galvanize"
       - "serve"
-      # - "8080"
       - "--config"
       - "data/config.yaml"
     volumes:

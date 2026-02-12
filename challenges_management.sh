@@ -45,7 +45,6 @@ declare -A CONFIG=(
     [PARALLEL_BUILDS]="4"
     [DEBUG]="false"
     [SKIP_DOCKER_CHECK]="false"
-    [BACKUP_BEFORE_SYNC]="false"
     [CONFIG_FILE]=""
 )
 
@@ -73,7 +72,6 @@ BEHAVIOR OPTIONS:
     --dry-run               Show what would be done without executing
     --force                 Force operations (rebuild images, overwrite challenges)
     --parallel-builds N     Number of parallel Docker builds (default: 4)
-    --backup-before-sync    Create backup before syncing challenges
 
 DEBUGGING:
     --debug                 Enable debug output
@@ -82,15 +80,15 @@ DEBUGGING:
     --version               Show version information
 
 EXAMPLES:
-  $SCRIPT_NAME --ctf-repo PolyPwnCTF-2025-challenges
-  $SCRIPT_NAME --action build --ctf-repo PolyPwnCTF-2025-challenges --categories "web,crypto"
-  $SCRIPT_NAME --action ingest --ctf-repo PolyPwnCTF-2025-challenges
-  $SCRIPT_NAME --action sync --ctf-repo PolyPwnCTF-2025-challenges --force
-  $SCRIPT_NAME --ctf-repo PolyPwnCTF-2025-challenges --dry-run
+  $SCRIPT_NAME --ctf-repo PolyPwnCTF-2025-Challenges
+  $SCRIPT_NAME --action build --ctf-repo PolyPwnCTF-2025-Challenges --categories "web,crypto"
+  $SCRIPT_NAME --action ingest --ctf-repo PolyPwnCTF-2025-Challenges
+  $SCRIPT_NAME --action sync --ctf-repo PolyPwnCTF-2025-Challenges --force
+  $SCRIPT_NAME --ctf-repo PolyPwnCTF-2025-Challenges --dry-run
 
 CONFIG FILE FORMAT:
   Create a .env file with KEY=VALUE pairs:
-    CTF_REPO=PolyPwnCTF-2025-challenges
+    CTF_REPO=PolyPwnCTF-2025-Challenges
     WORKING_DIR=/opt/ctf
     PARALLEL_BUILDS=8
 EOF
@@ -136,7 +134,6 @@ parse_arguments() {
             --force)             CONFIG[FORCE]="true";           shift ;;
             --debug)             CONFIG[DEBUG]="true"; _DEBUG="true"; shift ;;
             --skip-docker-check) CONFIG[SKIP_DOCKER_CHECK]="true"; shift ;;
-            --backup-before-sync) CONFIG[BACKUP_BEFORE_SYNC]="true"; shift ;;
             --help)    show_usage;   exit 0 ;;
             --version) show_version        ;;
             *)         error_exit "Unknown parameter: $1" ;;

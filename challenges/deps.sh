@@ -114,33 +114,34 @@ initialize_ctfd_config() {
         return 0
     fi
 
-    # Interactive initialization
     local url token
     
-    echo >&2
-    read -rp "Enter CTFd instance URL (e.g., https://ctf.example.com): " url
+    # Allow Ctrl+C to cancel interactive input
+    trap 'echo >&2; error_exit "Configuration aborted by user"' INT
     
-    # Validate URL
+    echo >&2
+    read -rp "Enter CTFd instance URL (e.g., https://ctf.example.com): " url || {
+        echo >&2
+        error_exit "Configuration aborted by user"
+    }
+    
     if [[ ! "$url" =~ ^https?:// ]]; then
+        trap - INT
         error_exit "Invalid URL format. Must start with http:// or https://"
     fi
     
-    read -rp "Enter CTFd Admin Access Token: " token
+    read -rp "Enter CTFd Admin Access Token: " token || {
+        echo >&2
+        error_exit "Configuration aborted by user"
+    }
     
     if [[ -z "$token" ]]; then
+        trap - INT
         error_exit "Access token cannot be empty"
     fi
     
-    echo >&2
-    log_info "Configuration:"
-    log_info "  URL: $url"
-    log_info "  Token: ${token:0:10}..."
-    echo >&2
-    
-    read -rp "Continue with this configuration? [Y/n] " confirm
-    if [[ "$confirm" =~ ^[Nn]$ ]]; then
-        error_exit "Configuration aborted by user"
-    fi
+    # Restore default signal handling
+    trap - INT
     
     ctfd_init_config "$url" "$token"
     log_success "CTFd configuration initialized successfully"

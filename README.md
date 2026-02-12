@@ -1,16 +1,16 @@
 # Infra PolyCyber
 
-L'objectif de ce dépot est de rassembler l'ensemble des ressources utilisées pour déployer les infrastructures CTFd de PolyCyber (PolyPwn, ainsi que CTFd interne à PolyCyber) afin de partager une méthode de déploiement de services fonctionnelle et simplifiée.  
+L'objectif de ce dépot est de rassembler l'ensemble des ressources utilisées pour déployer les infrastructures CTFd de PolyCyber (PolyPwn, ainsi que CTFd interne à PolyCyber) afin de partager une méthode de déploiement de services fonctionnelle et simplifiée.
 
 ## Scripts Disponibles
 
 ### 1. Script d'Installation CTFd (`setup.sh`)
 
-Script Bash qui automatise l'installation et la configuration d'un serveur CTFd avec Docker sécurisé via TLS et utilisant le plugin CTFd-Docker-Challenges.
+Script Bash qui automatise l'installation et la configuration d'un serveur CTFd utilisant le plugin [Zync](https://github.com/28Pollux28/zinc) et son instancer dédié [Galvanize](https://github.com/28Pollux28/galvanize).
 
 ### 2. Outil de Gestion des Challenges (`challenges_management.sh`)
 
-Script Bash avancé pour la construction, l'ingestion et la synchronisation des challenges CTF avec support des conteneurs Docker.
+Script Bash avancé pour la construction, l'ingestion et la synchronisation des challenges CTF avec support des conteneurs Docker et Docker compose.
 
 ## Prérequis
 
@@ -25,11 +25,8 @@ Script Bash avancé pour la construction, l'ingestion et la synchronisation des 
 ### Pour l'outil de gestion des challenges
 
 - **Docker** : Installé et fonctionnel
-- **CTFcli** : Installé via pipx (installation automatique si absent)
+- **curl, jq, yq** : Pour les appels API et le traitement YAML/JSON (vérifiés automatiquement)
 - **Dépôt de challenges** : Structure de dossiers avec fichiers `challenge.yml`
-
-> [!CAUTION]
-> **📍 Exigence de placement du script** : Le script de gestion des challenges a des exigences de placement spécifiques qui sont **essentielles** pour un fonctionnement correct. Consultez le [guide de placement détaillé](#outil-de-gestion-des-challenges) avant d'exécuter le script.
 
 ## Installation du serveur CTFd
 
@@ -38,7 +35,6 @@ Script Bash avancé pour la construction, l'ingestion et la synchronisation des 
    git clone https://github.com/polycyber/infra
    cd infra
    chmod +x setup.sh challenges_management.sh
-   mv challenges_management.sh ..
    ```
 
 2. **Exécutez le script d'installation et suivez les instructions** :
@@ -48,14 +44,8 @@ Script Bash avancé pour la construction, l'ingestion et la synchronisation des 
 
 3. **Rendez-vous sur l'URL du serveur configurée**
    - Effectuez la configuration de l'événement CTF
-   - Dirigez-vous vers le panneau de configuration administrateur `Admin Panel` --> `Plugins` --> `Docker Config`
-   - Entrez les informations suivantes pour initialiser la connexion du plugin à la socket Docker :
-     - Hostname: `172.17.0.1:2376`
-     - TLS Enabled: `Yes`
-     - Récupérez les CA Cert / Client Cert / Client Key depuis le serveur une fois la configuration finie : 
-    ```bash
-    scp -r <user>@<server_ip>:<working_dir>/cert/cert.zip <local_path>
-    ``` 
+   - Dirigez-vous vers le panneau de configuration administrateur `Admin Panel` --> `Plugins` --> `Zync Config`
+   - Entrez l'URL de votre instancer Galvanize et le secret JWT généré par le script d'installation
 
 ## Utilisation
 
@@ -104,36 +94,6 @@ Si vous utilisez l'option `--theme`, le script activera automatiquement le monta
 
 ### Outil de gestion des challenges
 
-> [!WARNING]
-> **Exigences de placement du script pour la gestion des challenges**
-> 
-> Le script de gestion de challenges utilise l'utilitaire `ctfcli`, qui nécessite que les répertoires de challenges soient situés **en dessous** de son point d'exécution dans la hiérarchie du système de fichiers. Cela signifie que le script doit être placé au même niveau que le répertoire des challenges ou dans un répertoire parent.
-
-#### **Exemples de placement correct**
-
-| Composant | Chemin | Statut |
-|-----------|--------|--------|
-| Challenges | `/home/user/challenges` | ✅ Fonctionne |
-| Script | `/home/user/challenges_management.sh` | ✅ Fonctionne |
-
-**Pourquoi cela fonctionne :** Le script est au même niveau que le répertoire des challenges, donc `ctfcli` peut accéder au dossier challenges.
-
-| Composant | Chemin | Statut |
-|-----------|--------|--------|
-| Challenges | `/home/user/challenges` | ✅ Fonctionne |
-| Script | `/home/challenges_management.sh` | ✅ Fonctionne |
-
-**Pourquoi cela fonctionne :** Le script est dans un répertoire parent, donc `ctfcli` peut toujours atteindre le dossier challenges en dessous.
-
-#### **Exemple de placement incorrect**
-
-| Composant | Chemin | Statut |
-|-----------|--------|--------|
-| Challenges | `/home/user/challenges` | ❌ Échoue |
-| Script | `/home/user/infra/challenges_management.sh` | ❌ Échoue |
-
-**Pourquoi cela échoue :** Le script est dans un sous-répertoire (`infra`) qui est au même niveau que `challenges`. Depuis cet emplacement, `ctfcli` ne peut pas accéder au répertoire des challenges car il n'est pas dans le chemin hiérarchique du script.
-
 #### Actions disponibles
 
 | Action | Description |
@@ -168,8 +128,6 @@ Si vous utilisez l'option `--theme`, le script activera automatiquement le monta
 | `--dry-run` | Mode simulation (affiche les actions sans les exécuter) |
 | `--force` | Force les opérations (reconstruction, écrasement) |
 | `--parallel-builds N` | Nombre de constructions parallèles (défaut: 4) |
-| `--backup-before-sync` | Crée une sauvegarde avant synchronisation |
-| `--no-deploy-compose ` | Empêche le déploiement automatique des challenges ayant des docker-compose statiques |
 
 #### Options de debug
 
@@ -238,20 +196,7 @@ Utilisation :
 - Installation de Docker CE, Docker Compose...
 - Configuration des groupes utilisateurs
 
-#### 3. Installation de pipx
-- Installation de pipx pour la gestion des paquets Python (plus spécifiquement CTFcli)
-
-#### 4. Génération des certificats TLS
-Le script génère automatiquement :
-- **Certificats CA** (Certificate Authority)
-- **Certificats serveur** pour Docker daemon
-- **Certificats client** pour l'authentification via le plugin CTFd-Docker-Challenges
-- **Archive ZIP** contenant les certificats nécessaires
-
-#### 5. Configuration Docker TLS
-- Configuration du Docker daemon pour utiliser TLS
-
-#### 6. Configuration des thèmes (optionnel)
+#### 3. Configuration des thèmes (optionnel)
 Si l'option `--theme` est utilisée :
 - Active le montage du dossier `theme/custom/` dans le conteneur CTFd
 - Permet l'utilisation de thèmes personnalisés
@@ -260,8 +205,7 @@ Si l'option `--theme` est utilisée :
 
 #### 1. Vérification des dépendances
 - Vérification de la disponibilité de Docker et du daemon
-- Contrôle de la présence des outils système requis
-- Installation automatique de CTFcli via pipx si nécessaire
+- Contrôle de la présence des outils système requis (curl, jq, yq)
 
 #### 2. Découverte des challenges
 - Analyse de la structure du dépôt de challenges
@@ -273,7 +217,7 @@ Si l'option `--theme` est utilisée :
 - Gestion des erreurs avec rapports détaillés
 
 #### 4. Ingestion des challenges
-- Installation via CTFcli dans l'instance CTFd
+- Installation via l'API CTFd dans l'instance CTFd
 
 #### 5. Synchronisation
 - Mise à jour des challenges existants
@@ -352,30 +296,11 @@ extra:
 
 ## Configuration générée
 
-### Certificats TLS
-
-Les certificats sont créés dans `${WORKING_DIR}/cert/` :
-
-- `ca-cert.pem` - Certificat de l'autorité de certification
-- `ca-key.pem` - Clé privée de l'autorité de certification
-- `server-cert.pem` - Certificat du serveur Docker
-- `server-key.pem` - Clé privée du serveur Docker
-- `client-cert.pem` - Certificat client
-- `client-key.pem` - Clé privée client
-- `cert.zip` - Archive contenant les certificats nécessaires
-
-### Configuration Docker
-
-Le script configure Docker pour écouter sur :
-- `172.17.0.1:2376` (TLS sécurisé)
-- Socket Unix par défaut (`fd://`)
-
 ### Secrets générés
 
 Le script génère automatiquement :
 - **Clé secrète CTFd** (32 caractères)
 - **Mot de passe base de données** (16 caractères)
 - **Mot de passe root base de données** (16 caractères)
-- **Mot de passe CA** (32 caractères)
 
 Ces scripts sont développés par l'équipe PolyCyber pour l'installation automatisée et la gestion de serveurs CTFd.

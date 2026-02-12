@@ -8,11 +8,6 @@ readonly _CHALL_SYNC_LOADED=1
 sync_challenges() {
     log_info "Syncing existing challenges..."
 
-    if [[ "${CONFIG[BACKUP_BEFORE_SYNC]}" == "true" ]]; then
-        log_warning "Backup functionality requires CTFd CLI or manual database backup"
-        log_warning "Please backup your CTFd database before syncing if needed"
-    fi
-
     local synced=0 fail=0
     local -a failed_names=() to_sync=()
 
