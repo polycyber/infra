@@ -1,0 +1,61 @@
+# Traefik Static Configuration
+# This file is mounted into the Traefik container as the main config.
+# Dynamic routing and TLS options are in config.yml (file provider).
+
+accessLog:
+  addInternals: true
+
+log:
+  level: INFO
+
+api:
+  insecure: false
+  dashboard: false
+
+# ──────────────────────────────────────────────
+# Providers
+# ──────────────────────────────────────────────
+
+providers:
+  docker:
+    exposedByDefault: false
+    endpoint: "unix:///var/run/docker.sock"
+    network: proxy
+  file:
+    filename: /etc/traefik/config.yml
+    watch: true
+
+# ──────────────────────────────────────────────
+# Entrypoints
+# ──────────────────────────────────────────────
+
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+
+  websecure:
+    address: ":443"
+    asDefault: true
+    http:
+      tls:
+        options: "securetls@file"
+        certResolver: letsencrypt
+
+# ──────────────────────────────────────────────
+# Certificate Resolvers
+# ──────────────────────────────────────────────
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: admin@polycyber.io
+      tlsChallenge: {}
+      storage: /etc/traefik/letsencrypt/acme.json
+      # ⚠ STAGING — switch to production before going live:
+      #   https://acme-v02.api.letsencrypt.org/directory
+      caServer: "https://acme-staging-v02.api.letsencrypt.org/directory"

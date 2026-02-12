@@ -1,0 +1,67 @@
+# Traefik Dynamic Configuration
+# Watched by the file provider — changes apply without restart.
+
+# ──────────────────────────────────────────────
+# TLS Options
+# ──────────────────────────────────────────────
+
+tls:
+#  certificates:
+#    - certFile: /certs/local.crt
+#      keyFile:  /certs/local.key
+
+  options:
+    securetls:
+      minVersion: VersionTLS12
+      maxVersion: VersionTLS13
+
+      cipherSuites:
+        # AES-GCM (hardware-accelerated on modern CPUs)
+        - TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+        - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+        - TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+        - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+        # ChaCha20 (faster on devices without AES-NI)
+        - TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
+        - TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+
+      # X25519 is fastest and most widely deployed; P-521 is rarely used
+      # and adds latency with no practical security gain over P-384.
+      curvePreferences:
+        - X25519
+        - CurveP256
+        - CurveP384
+
+      sniStrict: true
+
+      alpnProtocols:
+        - h2
+        - http/1.1
+
+# ──────────────────────────────────────────────
+# HTTP Middlewares
+# ──────────────────────────────────────────────
+
+http:
+  middlewares:
+    security-headers:
+      headers:
+        # HSTS — tell browsers to always use HTTPS
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+        forceSTSHeader: true
+
+        # Clickjacking / XSS / MIME-sniffing protection
+        frameDeny: true
+        contentTypeNosniff: true
+        browserXssFilter: true
+
+        # Referrer policy
+        referrerPolicy: "strict-origin-when-cross-origin"
+
+        # Permissions policy (restrict browser APIs)
+        permissionsPolicy: "camera=(), microphone=(), geolocation=(), payment=()"
+
+        # Prevent embedding in frames from other origins
+        customFrameOptionsValue: "SAMEORIGIN"

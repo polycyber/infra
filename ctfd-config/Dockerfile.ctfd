@@ -1,0 +1,19 @@
+FROM ctfd/ctfd:latest
+
+USER root
+
+# Install curl for healthcheck
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Use a wrapper entrypoint instead of fragile sed injection into upstream entrypoint.
+# The wrapper installs plugin requirements once, then delegates to the original entrypoint.
+COPY custom-entrypoint.sh /opt/CTFd/custom-entrypoint.sh
+RUN chmod +x /opt/CTFd/custom-entrypoint.sh
+
+USER 1001
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=60s \
+    CMD curl -f http://localhost:8000/ || exit 1
+
+ENTRYPOINT ["/opt/CTFd/custom-entrypoint.sh"]

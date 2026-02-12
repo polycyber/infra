@@ -2,93 +2,85 @@
 services:
   ctfd:
     build:
-      context: .
+      context: ./ctfd-config
       dockerfile: Dockerfile.ctfd
     container_name: ctfd
     hostname: ctfd
     restart: unless-stopped
     labels:
       - "traefik.enable=true"
+      # The static traefik.yml already handles HTTP→HTTPS redirect and default TLS.
+      # Labels only need routing rule, middleware, and service port.
       - "traefik.http.routers.ctfd.rule=Host(`${BASE_DOMAIN}`)"
-      - "traefik.http.routers.ctfd.entrypoints=${ENTRYPOINTS:-web}"
-      - "traefik.http.routers.ctfd.service=ctfd"
-      - "traefik.http.routers.ctfd.tls=${ENABLE_TLS:-false}"
-      - "traefik.http.routers.ctfd.tls.certresolver=${TLS_RESOLVER:-}"
-      - "traefik.http.routers.ctfd.tls.options=${TLS_OPTIONS:-}"
-      - "traefik.http.routers.ctfd.middlewares=${MIDDLEWARES:-}"
-      - "traefik.http.routers.ctfd-insecure.rule=Host(`${BASE_DOMAIN}`)"
-      - "traefik.http.routers.ctfd-insecure.entrypoints=web"
-      - "traefik.http.routers.ctfd-insecure.middlewares=${REDIRECT_MIDDLEWARE:-}"
+      - "traefik.http.routers.ctfd.middlewares=security-headers@file"
       - "traefik.http.services.ctfd.loadbalancer.server.port=8000"
     environment:
       - UPLOAD_FOLDER=/var/uploads
-      - DATABASE_URL=mysql+pymysql://db_user:${MARIADB_PASSWORD:-db_password}@maria-db/ctfd
+      - DATABASE_URL=mysql+pymysql://db_user:${MARIADB_PASSWORD:?Set MARIADB_PASSWORD in .env}@maria-db/ctfd
       - REDIS_URL=redis://redis:6379
       - WORKERS=4
       - LOG_FOLDER=/var/log/CTFd
       - ACCESS_LOG=-
       - ERROR_LOG=-
       - REVERSE_PROXY=true
-      - SECRET_KEY=${SECRET_KEY:-LocalDevSecretKeyChangeInProduction}
+      - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY in .env}
     volumes:
-      - ../data/CTFd/logs:/var/log/CTFd
-      - ../data/CTFd/uploads:/var/uploads
-#      - ../data/CTFd/themes/custom:/opt/CTFd/CTFd/themes/custom        # Only enable if a custom theme is desired
+      - ${DATA_DIR:-../data}/CTFd/logs:/var/log/CTFd
+      - ${DATA_DIR:-../data}/CTFd/uploads:/var/uploads
+#      - ${DATA_DIR:-../data}/CTFd/themes/custom:/opt/CTFd/CTFd/themes/custom
       - ../zync:/opt/CTFd/CTFd/plugins/zync:ro
     depends_on:
       redis:
         condition: service_started
       maria-db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
     networks:
-      - default
+      - proxy
       - internal
 
   traefik:
-    image: traefik:latest
+    image: traefik:v3.6
     container_name: traefik
     restart: unless-stopped
-    command:
-      - "--log.level=${LOG_LEVEL:-INFO}"
-      - "--api.insecure=${API_INSECURE:-false}"
-      - "--api.dashboard=${API_DASHBOARD:-false}"
-      - "--providers.docker=true"
-      - "--providers.docker.exposedbydefault=false"
-      - "--entrypoints.web.address=:80"
-      # All the rest is used only in production
-      - "--entrypoints.websecure.address=:443"
-      - "--providers.file.directory=/etc/traefik/dynamic"
-      - "--providers.file.watch=true"
-      - "--certificatesresolvers.myresolver.acme.tlschallenge=${ACME_ENABLED:-false}"
-      - "--certificatesresolvers.myresolver.acme.email=${ACME_EMAIL:-}"
-      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
-      - "--certificatesresolvers.myresolver.acme.caserver=${ACME_CA_SERVER:-https://acme-v02.api.letsencrypt.org/directory}"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
     ports:
       - "80:80"
       - "${HTTPS_PORT:-443}:443"
-    environment:
-      - BASE_DOMAIN=${BASE_DOMAIN:-localhost}
     volumes:
-      - "${DYNAMIC_CONFIG:-./dynamic.yml}:/etc/traefik/dynamic/dynamic.yml:ro"
-      - "${LETSENCRYPT_DIR:-./letsencrypt-disabled}:/letsencrypt"
-      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      # Static config — swap traefik-local.yml for local/IP deployments
+      - ${TRAEFIK_STATIC_CONFIG:-./traefik-config/traefik.yml}:/etc/traefik/traefik.yml:ro
+      # Dynamic config (TLS options, middlewares) — watched for live reload
+      - ./traefik-config/config.yml:/etc/traefik/config.yml:ro
+      # Let's Encrypt certificate storage (persistent)
+      - ./traefik-config/letsencrypt:/etc/traefik/letsencrypt
+      # Docker socket — required for Docker provider
+      # NOTE: grants root-equivalent host access; consider a socket proxy in production
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
-      - default
+      - proxy 
 
   maria-db:
-  # Would have preferred an alpine postresql image but postgresql is not supported officially supported
+    # MariaDB is used because CTFd does not officially support PostgreSQL
     image: mariadb:10.11
     restart: unless-stopped
     container_name: maria-db
     hostname: maria-db
     environment:
-      - MARIADB_ROOT_PASSWORD=${MARIADB_ROOT_PASSWORD:-db_root_password}
+      - MARIADB_ROOT_PASSWORD=${MARIADB_ROOT_PASSWORD:?Set MARIADB_ROOT_PASSWORD in .env}
       - MARIADB_USER=db_user
-      - MARIADB_PASSWORD=${MARIADB_PASSWORD:-db_password}
+      - MARIADB_PASSWORD=${MARIADB_PASSWORD:?Set MARIADB_PASSWORD in .env}
       - MARIADB_DATABASE=ctfd
       - MARIADB_AUTO_UPGRADE=1
     volumes:
-      - ../data/mysql:/var/lib/mysql
+      - ${DATA_DIR:-../data}/mysql:/var/lib/mysql
     networks:
       - internal
     healthcheck:
@@ -97,39 +89,36 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
-    # This command is required to set important mariadb defaults
     command: [mysqld, --character-set-server=utf8mb4, --collation-server=utf8mb4_unicode_ci, --wait_timeout=28800, --log-warnings=0]
 
   redis:
     container_name: redis
     hostname: redis
-    image: redis:7.4.2-alpine
+    image: redis:7-alpine
     restart: unless-stopped
     volumes:
-      - ../data/redis:/data
+      - ${DATA_DIR:-../data}/redis:/data
     networks:
       - internal
 
   instancer:
-    build:
-      context: ${GALVANIZE_REPO_PATH:-../galvanize}
-      dockerfile: galvanize-instancer/Dockerfile
+    image: ghcr.io/28pollux28/galvanize:latest
     container_name: galvanize-instancer
     stop_grace_period: 1m
     stop_signal: SIGINT
     ports:
       - "8080:8080"
     environment:
-      - "DEVELOPMENT=true"
+      - "DEVELOPMENT=${DEVELOPMENT:-true}"
     entrypoint:
       - "./galvanize"
       - "serve"
-      - "8080"
+      # - "8080"
       - "--config"
       - "data/config.yaml"
     volumes:
-      - ../data/galvanize:/app/data/:Z
-      - ${GALVANIZE_CONFIG_PATH:-../galvanize/config.yaml}:/app/data/config.yaml:Z
+      - ${DATA_DIR:-../data}/galvanize:/app/data/:Z
+      - ${GALVANIZE_CONFIG_PATH:-../data/galvanize/config.yaml}:/app/data/config.yaml:Z
       - ${SSH_KEY_PATH:-../ssh/ssh-key}:/home/galvanize/.ssh/ansible-ssh:Z,ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
@@ -137,11 +126,13 @@ services:
       timeout: 10s
       retries: 5
     restart: unless-stopped
+    depends_on:
+      ctfd:
+        condition: service_healthy
     networks:
-      - internal
-      - default
+      - proxy
 
 networks:
-    default:
-    internal:
-        internal: true
+  proxy:
+  internal:
+    internal: true

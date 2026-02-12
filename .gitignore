@@ -1,3 +1,4 @@
 CTFd-Docker-Challenges/*
 data/*
 .vscode/*
+*.env
